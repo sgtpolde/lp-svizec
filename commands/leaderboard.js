@@ -22,7 +22,9 @@ module.exports = {
         const { region, summonerId, gameName, tagLine } = account;
         try {
           const rankedStats = await getRankedStats(summonerId, region);
-          const soloQueueStats = rankedStats.find(queue => queue.queueType === 'RANKED_SOLO_5x5');
+          const soloQueueStats = rankedStats.find(
+            (queue) => queue.queueType === 'RANKED_SOLO_5x5'
+          );
 
           if (soloQueueStats) {
             rankings.push({
@@ -42,7 +44,10 @@ module.exports = {
             });
           }
         } catch (error) {
-          console.error(`Error fetching ranked data for ${gameName}#${tagLine}:`, error);
+          console.error(
+            `Error fetching ranked data for ${gameName}#${tagLine}:`,
+            error
+          );
           rankings.push({
             summonerName: `${gameName}#${tagLine}`,
             region: region.toUpperCase(),

@@ -13,7 +13,9 @@ module.exports = {
    */
   async execute(message, args) {
     if (args.length < 3) {
-      return message.reply('Usage: !removeaccount <gameName> <tagLine> <server>');
+      return message.reply(
+        'Usage: !removeaccount <gameName> <tagLine> <server>'
+      );
     }
 
     const gameName = args[0];
@@ -22,11 +24,23 @@ module.exports = {
 
     // Validate region
     const validRegions = [
-      'na', 'euw', 'eun', 'kr', 'jp', 'oce', 'br', 'lan', 'las', 'ru', 'tr'
+      'na',
+      'euw',
+      'eun',
+      'kr',
+      'jp',
+      'oce',
+      'br',
+      'lan',
+      'las',
+      'ru',
+      'tr',
     ];
 
     if (!validRegions.includes(region)) {
-      return message.reply(`Invalid server. Valid servers are: ${validRegions.join(', ')}`);
+      return message.reply(
+        `Invalid server. Valid servers are: ${validRegions.join(', ')}`
+      );
     }
 
     try {
@@ -38,9 +52,13 @@ module.exports = {
       });
 
       if (account) {
-        message.reply(`Account ${gameName}#${tagLine} on ${region.toUpperCase()} removed successfully!`);
+        message.reply(
+          `Account ${gameName}#${tagLine} on ${region.toUpperCase()} removed successfully!`
+        );
       } else {
-        message.reply(`Account ${gameName}#${tagLine} on ${region.toUpperCase()} not found.`);
+        message.reply(
+          `Account ${gameName}#${tagLine} on ${region.toUpperCase()} not found.`
+        );
       }
     } catch (error) {
       console.error(error);

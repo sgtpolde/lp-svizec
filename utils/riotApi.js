@@ -1,5 +1,6 @@
 // utils/riotApi.js
 const axios = require('axios');
+const logger = require('./logger');
 
 const riotApiKey = process.env.RIOT_API_KEY;
 
@@ -41,66 +42,62 @@ function getRegionalEndpoint(region) {
 }
 
 /**
+ * Helper function to handle API requests with error handling
+ * @param {string} url - The URL to request
+ * @returns {Promise<any>} - The response data
+ */
+async function apiRequest(url) {
+  try {
+    const response = await riotApi.get(url);
+    return response.data;
+  } catch (error) {
+    logger.error(`API request failed: ${url} - ${error}`);
+    throw error;
+  }
+}
+
+/**
  * Get PUUID by Riot ID (gameName and tagLine)
- * @param {string} gameName
- * @param {string} tagLine
  */
 async function getPUUIDByRiotID(gameName, tagLine) {
-  const response = await riotApi.get(
-    `https://americas.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`
-  );
-  return response.data;
+  const url = `https://americas.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`;
+  return await apiRequest(url);
 }
 
 /**
  * Get Summoner data by PUUID and region
- * @param {string} puuid
- * @param {string} region
  */
 async function getSummonerByPUUID(puuid, region) {
   const platformHost = platformEndpoints[region];
-  const response = await riotApi.get(
-    `https://${platformHost}/lol/summoner/v4/summoners/by-puuid/${puuid}`
-  );
-  return response.data;
+  const url = `https://${platformHost}/lol/summoner/v4/summoners/by-puuid/${puuid}`;
+  return await apiRequest(url);
 }
 
 /**
  * Get match history by PUUID.
- * @param {string} puuid
- * @param {string} region
  */
 async function getMatchHistory(puuid, region) {
   const regionalHost = getRegionalEndpoint(region);
-  const response = await riotApi.get(
-    `https://${regionalHost}/lol/match/v5/matches/by-puuid/${puuid}/ids`,
-    { params: { count: 5 } }
-  );
-  return response.data;
+  const url = `https://${regionalHost}/lol/match/v5/matches/by-puuid/${puuid}/ids?count=5`;
+  return await apiRequest(url);
 }
 
 /**
  * Get match details by match ID.
- * @param {string} matchId
- * @param {string} region
  */
 async function getMatchDetails(matchId, region) {
   const regionalHost = getRegionalEndpoint(region);
-  const response = await riotApi.get(`https://${regionalHost}/lol/match/v5/matches/${matchId}`);
-  return response.data;
+  const url = `https://${regionalHost}/lol/match/v5/matches/${matchId}`;
+  return await apiRequest(url);
 }
 
 /**
  * Get ranked stats by Summoner ID.
- * @param {string} summonerId
- * @param {string} region
  */
 async function getRankedStats(summonerId, region) {
   const platformHost = platformEndpoints[region];
-  const response = await riotApi.get(
-    `https://${platformHost}/lol/league/v4/entries/by-summoner/${summonerId}`
-  );
-  return response.data;
+  const url = `https://${platformHost}/lol/league/v4/entries/by-summoner/${summonerId}`;
+  return await apiRequest(url);
 }
 
 module.exports = {
