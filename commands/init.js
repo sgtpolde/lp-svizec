@@ -42,7 +42,9 @@ module.exports = {
         await message.reply(`Bot has been initialized in this channel.`);
       }
     } catch (error) {
-      logger.error(`Error initializing bot in guild ${guildId}: ${error.message}`);
+      logger.error(
+        `Error initializing bot in guild ${guildId}: ${error.message}`
+      );
       await message.reply('❌ An error occurred while initializing the bot.');
     }
   },

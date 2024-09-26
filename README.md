@@ -1,6 +1,5 @@
 init
 
-
 Levels in Order of Priority (Lowest to Highest Severity):
 
     silly (lowest severity)

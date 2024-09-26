@@ -2,19 +2,21 @@
 
 const fs = require('fs');
 const path = require('path');
-
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const mongoose = require('mongoose');
 const logger = require('./utils/logger');
-const config = require('./config');
+require('./utils/keepAlive.js'); 
+
+// Load environment variables from .env file
+require('dotenv').config();
 
 // Check for required environment variables
-if (!config.discordToken) {
+if (!process.env.DISCORD_TOKEN) {
   logger.error('Missing DISCORD_TOKEN in environment variables.');
   process.exit(1);
 }
 
-if (!config.mongoUri) {
+if (!process.env.MONGODB_URI) {
   logger.error('Missing MONGODB_URI in environment variables.');
   process.exit(1);
 }
@@ -84,11 +86,11 @@ for (const file of eventFiles) {
 })();
 
 async function initializeBot() {
-  await mongoose.connect(config.mongoUri);
+  await mongoose.connect(process.env.MONGODB_URI);
   logger.info('Connected to MongoDB');
 
   // Login to Discord
-  await client.login(config.discordToken);
+  await client.login(process.env.DISCORD_TOKEN);
   logger.info('Logged in to Discord');
 }
 
