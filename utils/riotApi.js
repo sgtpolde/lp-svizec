@@ -8,7 +8,7 @@ const riotApi = axios.create({
   headers: { 'X-Riot-Token': riotApiKey },
 });
 
-// Mapping of region identifiers to API endpoints
+// Mapping of platform endpoints
 const platformEndpoints = {
   na: 'na1.api.riotgames.com',
   euw: 'euw1.api.riotgames.com',
@@ -23,8 +23,8 @@ const platformEndpoints = {
   tr: 'tr1.api.riotgames.com',
 };
 
-// Mapping for regional routing values
-const regionalEndpoints = {
+// Mapping of regions to routing values
+const routingEndpoints = {
   americas: ['na', 'br', 'lan', 'las', 'oce'],
   europe: ['euw', 'eun', 'tr', 'ru'],
   asia: ['kr', 'jp'],
@@ -32,12 +32,12 @@ const regionalEndpoints = {
 
 // Function to get the regional endpoint
 function getRegionalEndpoint(region) {
-  for (const [key, regions] of Object.entries(regionalEndpoints)) {
+  for (const [routing, regions] of Object.entries(routingEndpoints)) {
     if (regions.includes(region)) {
-      return `${key}.api.riotgames.com`;
+      return `${routing}.api.riotgames.com`;
     }
   }
-  // Default to Americas if region not found
+  // Default to 'americas' if region not found
   return 'americas.api.riotgames.com';
 }
 
@@ -51,7 +51,14 @@ async function apiRequest(url) {
     const response = await riotApi.get(url);
     return response.data;
   } catch (error) {
-    logger.error(`API request failed: ${url} - ${error}`);
+    if (error.response) {
+      logger.error(
+        `API request failed: ${url} - ${error.response.status} ${error.response.statusText}`
+      );
+      logger.error(`Response data: ${JSON.stringify(error.response.data)}`);
+    } else {
+      logger.error(`API request failed: ${url} - ${error.message}`);
+    }
     throw error;
   }
 }
@@ -60,7 +67,9 @@ async function apiRequest(url) {
  * Get PUUID by Riot ID (gameName and tagLine)
  */
 async function getPUUIDByRiotID(gameName, tagLine) {
-  const url = `https://americas.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(gameName)}/${encodeURIComponent(tagLine)}`;
+  const url = `https://americas.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(
+    gameName
+  )}/${encodeURIComponent(tagLine)}`;
   return await apiRequest(url);
 }
 
@@ -77,37 +86,24 @@ async function getSummonerByPUUID(puuid, region) {
  * Get match history by PUUID.
  */
 async function getMatchHistory(puuid, region, queueType = 'all') {
-  try {
-    const matchIds = [];
-    let start = 0;
-    const count = 20; // Number of matches to fetch
+  const routingHost = getRegionalEndpoint(region);
+  let url = `https://${routingHost}/lol/match/v5/matches/by-puuid/${puuid}/ids?count=20`;
 
-    // Map region to routing value
-    const routingRegion = getRoutingRegion(region);
-
-    // Build the API URL
-    let url = `https://${routingRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?start=${start}&count=${count}&api_key=${process.env.RIOT_API_KEY}`;
-
-    // Append queue filter if needed
-    if (queueType === 'ranked') {
-      // Queue ID 420 corresponds to Ranked Solo/Duo
-      url += '&queue=420';
-    }
-
-    const response = await axios.get(url);
-    return response.data;
-  } catch (error) {
-    logger.error(`Error fetching match history: ${error}`);
-    throw error;
+  // Append queue filter if needed
+  if (queueType === 'ranked') {
+    // Queue ID 420 corresponds to Ranked Solo/Duo
+    url += '&queue=420';
   }
+
+  return await apiRequest(url);
 }
 
 /**
  * Get match details by match ID.
  */
 async function getMatchDetails(matchId, region) {
-  const regionalHost = getRegionalEndpoint(region);
-  const url = `https://${regionalHost}/lol/match/v5/matches/${matchId}`;
+  const routingHost = getRegionalEndpoint(region);
+  const url = `https://${routingHost}/lol/match/v5/matches/${matchId}`;
   return await apiRequest(url);
 }
 

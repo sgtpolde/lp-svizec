@@ -5,7 +5,6 @@ const path = require('path');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const mongoose = require('mongoose');
 const logger = require('./utils/logger');
-require('./utils/keepAlive.js'); 
 
 // Load environment variables from .env file
 require('dotenv').config();
@@ -44,7 +43,9 @@ for (const file of commandFiles) {
   try {
     const command = require(filePath);
     if (!command.data || !command.data.name) {
-      logger.warn(`The command at ${file} is missing a required "data.name" property.`);
+      logger.warn(
+        `The command at ${file} is missing a required "data.name" property.`
+      );
       continue;
     }
     client.commands.set(command.data.name, command);

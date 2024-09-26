@@ -1,4 +1,3 @@
-// commands/stats.js
 const Account = require('../models/Account');
 const GuildSettings = require('../models/GuildSettings');
 const { EmbedBuilder } = require('discord.js');
@@ -32,8 +31,7 @@ module.exports = {
       });
 
       for (const account of accounts) {
-        const { region, puuid, summonerId, gameName, tagLine, discordId } =
-          account;
+        const { region, puuid, summonerId, gameName, tagLine } = account;
 
         // Fetch match history, filtering for ranked solo/duo games
         const matchHistory = await getMatchHistory(puuid, region, 'ranked');
@@ -59,12 +57,14 @@ module.exports = {
           let currentLP = account.lastLP || 0;
           let lpChange = null;
           let rank = 'Unranked';
+          let tier = 'Unranked';
+          let division = '';
 
           if (soloQueueStats) {
             currentLP = soloQueueStats.leaguePoints;
-            rank = `${capitalizeFirstLetter(
-              soloQueueStats.tier.toLowerCase()
-            )} ${soloQueueStats.rank}`;
+            tier = capitalizeFirstLetter(soloQueueStats.tier.toLowerCase());
+            division = soloQueueStats.rank;
+            rank = `${tier} ${division}`;
             lpChange = currentLP - (account.lastLP || 0);
             account.lastLP = currentLP;
           }
@@ -98,36 +98,63 @@ module.exports = {
               cs /
               (matchDetails.info.gameDuration / 60)
             ).toFixed(1);
-            const damageDealt = participant.totalDamageDealtToChampions;
             const visionScore = participant.visionScore;
+            const killParticipation = (
+              ((participant.kills + participant.assists) /
+                matchDetails.info.teams.find(
+                  (t) => t.teamId === participant.teamId
+                ).objectives.champion.kills) *
+              100
+            ).toFixed(1);
 
-            // Create a nicely formatted embed
+            // LP Change Indicator
+            let lpChangeText = 'N/A';
+            let lpChangeEmoji = '';
+            if (lpChange !== null) {
+              lpChangeEmoji =
+                lpChange > 0
+                  ? '🔼' // Up arrow for LP gain
+                  : lpChange < 0
+                    ? '🔽' // Down arrow for LP loss
+                    : '⏺️'; // Dot for no change
+              lpChangeText = `${lpChangeEmoji} ${lpChange > 0 ? '+' : ''}${lpChange} LP`;
+            }
+
+            // LP Progress Bar
+            const lpProgressBar = createProgressBar(currentLP % 100, 100, 10);
+            const maxCsPerMinute = 10; // You can adjust this value
+            const csProgressBar = createProgressBar(csPerMinute, maxCsPerMinute, 10);
+            // Create the embed
             const embed = new EmbedBuilder()
               .setColor(participant.win ? '#00FF00' : '#FF0000')
-              .setTitle(`${gameName}#${tagLine} - ${result} in Ranked Solo/Duo`)
+              .setTitle(`${gameName}#${tagLine} - ${result}`)
               .setDescription(
-                `**KDA**: ${kda}\n**LP Change**: ${
-                  lpChange !== null
-                    ? `${lpChange > 0 ? '+' : ''}${lpChange} LP`
-                    : 'N/A'
-                }`
+                `**Rank:** ${rank} (${currentLP} LP)\n**LP Change:** ${lpChangeText}\n**LP Progress:** ${lpProgressBar}`
               )
               .addFields(
-                { name: 'Champion', value: championName, inline: true },
-                { name: 'Current Rank', value: rank, inline: true },
                 {
-                  name: 'CS (CS per Minute)',
-                  value: `${cs} (${csPerMinute})`,
+                  name: 'Champion',
+                  value: championName,
                   inline: true,
                 },
                 {
-                  name: 'Total Damage Dealt',
-                  value: damageDealt.toString(),
+                  name: 'KDA',
+                  value: `⚔️ ${kda}`,
+                  inline: true,
+                },
+                {
+                  name: 'Kill Participation',
+                  value: `${killParticipation}%`,
+                  inline: true,
+                },
+                {
+                  name: 'CS per Minute',
+                  value: `📈 ${csPerMinute} cs/min\n${csProgressBar}`, // Added CS per minute with progress bar
                   inline: true,
                 },
                 {
                   name: 'Vision Score',
-                  value: visionScore.toString(),
+                  value: `👁️ ${visionScore}`,
                   inline: true,
                 }
               )
@@ -135,32 +162,30 @@ module.exports = {
                 `https://ddragon.leagueoflegends.com/cdn/13.21.1/img/champion/${championName}.png`
               )
               .setFooter({
-                text: `Game Duration: ${formatGameDuration(matchDetails.info.gameDuration)}`,
+                text: `Game Duration: ${formatGameDuration(
+                  matchDetails.info.gameDuration
+                )}`,
               })
               .setTimestamp();
 
-            // Determine the guild(s) where the user is a member
-            const user = await client.users.fetch(discordId);
-            const mutualGuilds = client.guilds.cache.filter((guild) =>
-              guild.members.cache.has(discordId)
-            );
-
-            // Send the embed to the initialized channel in each mutual guild
-            for (const [guildId, guild] of mutualGuilds) {
-              const channelId = guildSettingsMap.get(guildId);
-              if (channelId) {
+            // Send the embed to the initialized channel in each guild
+            for (const [guildId, channelId] of guildSettingsMap.entries()) {
+              try {
+                const guild = await client.guilds.fetch(guildId);
                 const channel = await guild.channels.fetch(channelId);
                 if (channel) {
                   await channel.send({ embeds: [embed] }).catch((err) => {
                     logger.error(
-                      `Failed to send message to channel ${channelId}: ${err}`
+                      `Failed to send message to channel ${channelId}: ${err.message}`
                     );
                   });
                 } else {
                   logger.warn(`Channel not found: ${channelId}`);
                 }
-              } else {
-                logger.warn(`No initialized channel for guild ${guildId}`);
+              } catch (error) {
+                logger.error(
+                  `Error sending message to guild ${guildId}: ${error.message}`
+                );
               }
             }
           }
@@ -171,7 +196,7 @@ module.exports = {
         await message.reply('✅ Stats updated successfully.');
       }
     } catch (error) {
-      logger.error(`Error in stats command: ${error}`);
+      logger.error(`Error in stats command: ${error.stack || error}`);
       if (message) {
         await message.reply('❌ An error occurred while fetching stats.');
       }
@@ -187,6 +212,15 @@ module.exports = {
       const minutes = Math.floor(seconds / 60);
       const secs = seconds % 60;
       return `${minutes}m ${secs}s`;
+    }
+
+    // Helper function to create a progress bar
+    function createProgressBar(value, maxValue, size) {
+      const percentage = Math.min(value / maxValue, 1);
+      const filledBars = Math.round(size * percentage);
+      const emptyBars = size - filledBars;
+      const progressBar = '█'.repeat(filledBars) + '░'.repeat(emptyBars);
+      return `\`${progressBar}\` ${Math.round(percentage * 100)}%`;
     }
   },
 };
