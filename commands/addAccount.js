@@ -14,14 +14,12 @@ module.exports = {
     description: 'Add a League of Legends account to track',
   },
   /**
-   * Execute the add account command with message cleanup and improved messages.
+   * Execute the add account command with updated LP tracking.
    * @param {Message} message
    * @param {string[]} args
    * @param {Client} client
    */
   async execute(message, args, client) {
-    const collectedMessages = [];
-
     try {
       // Check if the bot has permission to manage messages
       if (
@@ -34,22 +32,17 @@ module.exports = {
         );
       }
 
-      // Collect input from the user
-      const gameName = await collectInput(
-        message,
-        'Please enter your Riot ID **Game Name** (e.g., **SummonerName**):',
-        collectedMessages
-      );
-      const tagLine = await collectInput(
-        message,
-        'Please enter your Riot ID **Tag Line** (e.g., **1234**):',
-        collectedMessages
-      );
-      const regionInput = await collectInput(
-        message,
-        'Please enter your **Server/Region** (e.g., **euw**, **na**, **kr**):',
-        collectedMessages
-      );
+      // Check if all required arguments are provided
+      if (args.length < 3) {
+        await message.reply(
+          '❌ Usage: `!addaccount <GameName> <TagLine> <Region>`\nExample: `!addaccount SummonerName 1234 euw`'
+        );
+        // Delete the user's command message after sending the usage message
+        await message.delete().catch(console.error);
+        return;
+      }
+
+      const [gameName, tagLine, regionInput] = args;
       const region = regionInput.toLowerCase();
 
       // Validate region
@@ -71,14 +64,15 @@ module.exports = {
         await message.reply(
           `❌ Invalid server. Valid servers are: ${validRegions.join(', ')}`
         );
+        // Delete the user's command message after sending the error message
+        await message.delete().catch(console.error);
         return;
       }
 
       // Inform the user that we're processing their account
-      const processingMessage = await message.reply(
+      const processingMessage = await message.channel.send(
         '🔄 Processing your account. Please wait...'
       );
-      collectedMessages.push(processingMessage);
 
       // Get PUUID using Riot ID
       const accountData = await getPUUIDByRiotID(gameName, tagLine);
@@ -95,7 +89,10 @@ module.exports = {
       });
 
       if (existingAccount) {
+        await processingMessage.delete().catch(console.error);
         await message.reply('⚠️ This account is already being tracked.');
+        // Delete the user's command message
+        await message.delete().catch(console.error);
         return;
       }
 
@@ -107,10 +104,20 @@ module.exports = {
 
       let lastLP = null;
       let rank = 'Unranked';
+      let lpHistory = [];
 
       if (soloQueueStats) {
         lastLP = soloQueueStats.leaguePoints;
-        rank = `${capitalizeFirstLetter(soloQueueStats.tier.toLowerCase())} ${soloQueueStats.rank}`;
+        rank = `${capitalizeFirstLetter(
+          soloQueueStats.tier.toLowerCase()
+        )} ${soloQueueStats.rank}`;
+
+        // Initialize lpHistory with the current LP record
+        lpHistory.push({
+          lp: lastLP,
+          timestamp: new Date(),
+          rank: rank,
+        });
       }
 
       const account = new Account({
@@ -122,9 +129,14 @@ module.exports = {
         summonerId: summonerData.id,
         lastMatchId: null,
         lastLP,
+        lpHistory, // Include the lpHistory array
       });
 
       await account.save();
+
+      // Delete the processing message and the user's command message
+      await processingMessage.delete().catch(console.error);
+      await message.delete().catch(console.error);
 
       // Send a detailed confirmation message using an embed
       const confirmationEmbed = new EmbedBuilder()
@@ -145,15 +157,14 @@ module.exports = {
         .setFooter({ text: `Summoner Level: ${summonerData.summonerLevel}` })
         .setTimestamp();
 
-      const finalMessage = await message.reply({ embeds: [confirmationEmbed] });
-      collectedMessages.push(finalMessage);
+      await message.channel.send({ embeds: [confirmationEmbed] });
     } catch (error) {
       logger.error(`Error in addAccount command: ${error}`);
-      if (error instanceof TimeoutError) {
-        await message.reply(
-          '⏰ You did not respond in time. Please try the command again.'
-        );
-      } else if (error.response && error.response.status === 404) {
+      // Delete the processing message and the user's command message
+      await message.delete().catch(console.error);
+      await processingMessage?.delete().catch(console.error);
+
+      if (error.response && error.response.status === 404) {
         await message.reply(
           '❌ Account not found. Please check the game name, tag line, and server.'
         );
@@ -161,42 +172,6 @@ module.exports = {
         await message.reply('❌ Invalid or expired Riot API key.');
       } else {
         await message.reply('❌ An error occurred while adding the account.');
-      }
-    } finally {
-      // Delete all collected messages after a delay
-      setTimeout(async () => {
-        for (const msg of collectedMessages) {
-          await msg.delete().catch(console.error);
-        }
-      }, 5000); // Delay in milliseconds
-    }
-
-    // Helper function to collect input
-    async function collectInput(message, promptText, collectedMessages) {
-      const promptMessage = await message.reply(promptText);
-      collectedMessages.push(promptMessage);
-
-      const filter = (m) => m.author.id === message.author.id;
-      try {
-        const responseMessages = await message.channel.awaitMessages({
-          filter,
-          max: 1,
-          time: 60000,
-          errors: ['time'],
-        });
-        const response = responseMessages.first();
-        collectedMessages.push(response);
-        return response.content.trim();
-      } catch (error) {
-        throw new TimeoutError();
-      }
-    }
-
-    // Custom TimeoutError class
-    class TimeoutError extends Error {
-      constructor(message) {
-        super(message);
-        this.name = 'TimeoutError';
       }
     }
 

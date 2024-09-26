@@ -76,10 +76,30 @@ async function getSummonerByPUUID(puuid, region) {
 /**
  * Get match history by PUUID.
  */
-async function getMatchHistory(puuid, region) {
-  const regionalHost = getRegionalEndpoint(region);
-  const url = `https://${regionalHost}/lol/match/v5/matches/by-puuid/${puuid}/ids?count=5`;
-  return await apiRequest(url);
+async function getMatchHistory(puuid, region, queueType = 'all') {
+  try {
+    const matchIds = [];
+    let start = 0;
+    const count = 20; // Number of matches to fetch
+
+    // Map region to routing value
+    const routingRegion = getRoutingRegion(region);
+
+    // Build the API URL
+    let url = `https://${routingRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?start=${start}&count=${count}&api_key=${process.env.RIOT_API_KEY}`;
+
+    // Append queue filter if needed
+    if (queueType === 'ranked') {
+      // Queue ID 420 corresponds to Ranked Solo/Duo
+      url += '&queue=420';
+    }
+
+    const response = await axios.get(url);
+    return response.data;
+  } catch (error) {
+    logger.error(`Error fetching match history: ${error}`);
+    throw error;
+  }
 }
 
 /**

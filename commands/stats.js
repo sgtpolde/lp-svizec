@@ -34,7 +34,10 @@ module.exports = {
       for (const account of accounts) {
         const { region, puuid, summonerId, gameName, tagLine, discordId } =
           account;
-        const matchHistory = await getMatchHistory(puuid, region);
+
+        // Fetch match history, filtering for ranked solo/duo games
+        const matchHistory = await getMatchHistory(puuid, region, 'ranked');
+
         const newMatches = [];
 
         // Check for new matches
@@ -53,13 +56,15 @@ module.exports = {
             (queue) => queue.queueType === 'RANKED_SOLO_5x5'
           );
 
-          let currentLP = account.lastLP;
+          let currentLP = account.lastLP || 0;
           let lpChange = null;
           let rank = 'Unranked';
 
           if (soloQueueStats) {
             currentLP = soloQueueStats.leaguePoints;
-            rank = `${capitalizeFirstLetter(soloQueueStats.tier.toLowerCase())} ${soloQueueStats.rank}`;
+            rank = `${capitalizeFirstLetter(
+              soloQueueStats.tier.toLowerCase()
+            )} ${soloQueueStats.rank}`;
             lpChange = currentLP - (account.lastLP || 0);
             account.lastLP = currentLP;
           }
@@ -70,6 +75,12 @@ module.exports = {
           // Fetch and report new matches
           for (const matchId of newMatches.reverse()) {
             const matchDetails = await getMatchDetails(matchId, region);
+
+            // Skip if the game mode is not ranked solo/duo
+            if (matchDetails.info.queueId !== 420) {
+              continue;
+            }
+
             const participant = matchDetails.info.participants.find(
               (p) => p.puuid === puuid
             );
@@ -80,39 +91,52 @@ module.exports = {
             const result = participant.win ? 'Victory' : 'Defeat';
             const championName = participant.championName;
 
+            // Additional stats
+            const cs =
+              participant.totalMinionsKilled + participant.neutralMinionsKilled;
+            const csPerMinute = (
+              cs /
+              (matchDetails.info.gameDuration / 60)
+            ).toFixed(1);
+            const damageDealt = participant.totalDamageDealtToChampions;
+            const visionScore = participant.visionScore;
+
             // Create a nicely formatted embed
             const embed = new EmbedBuilder()
               .setColor(participant.win ? '#00FF00' : '#FF0000')
-              .setTitle(
-                `Match Summary for ${gameName}#${tagLine} on ${region.toUpperCase()}`
+              .setTitle(`${gameName}#${tagLine} - ${result} in Ranked Solo/Duo`)
+              .setDescription(
+                `**KDA**: ${kda}\n**LP Change**: ${
+                  lpChange !== null
+                    ? `${lpChange > 0 ? '+' : ''}${lpChange} LP`
+                    : 'N/A'
+                }`
               )
-              .setDescription(`**${result}** in the last match.`)
               .addFields(
                 { name: 'Champion', value: championName, inline: true },
-                { name: 'KDA', value: kda, inline: true },
-                {
-                  name: 'LP Change',
-                  value:
-                    lpChange !== null
-                      ? `${lpChange > 0 ? '+' : ''}${lpChange} LP`
-                      : 'N/A',
-                  inline: true,
-                },
                 { name: 'Current Rank', value: rank, inline: true },
                 {
+                  name: 'CS (CS per Minute)',
+                  value: `${cs} (${csPerMinute})`,
+                  inline: true,
+                },
+                {
                   name: 'Total Damage Dealt',
-                  value: participant.totalDamageDealtToChampions.toString(),
+                  value: damageDealt.toString(),
                   inline: true,
                 },
                 {
                   name: 'Vision Score',
-                  value: participant.visionScore.toString(),
+                  value: visionScore.toString(),
                   inline: true,
                 }
               )
               .setThumbnail(
                 `https://ddragon.leagueoflegends.com/cdn/13.21.1/img/champion/${championName}.png`
               )
+              .setFooter({
+                text: `Game Duration: ${formatGameDuration(matchDetails.info.gameDuration)}`,
+              })
               .setTimestamp();
 
             // Determine the guild(s) where the user is a member
@@ -156,6 +180,13 @@ module.exports = {
     // Helper function to capitalize the first letter
     function capitalizeFirstLetter(string) {
       return string.charAt(0).toUpperCase() + string.slice(1);
+    }
+
+    // Helper function to format game duration
+    function formatGameDuration(seconds) {
+      const minutes = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${minutes}m ${secs}s`;
     }
   },
 };
