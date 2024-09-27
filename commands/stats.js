@@ -13,7 +13,7 @@ module.exports = {
     name: 'stats',
     description: 'Fetch and display stats for tracked accounts',
   },
-  /**
+    /**
    * Execute the stats command.
    * @param {Message|null} message
    * @param {string[]|null} args
@@ -66,7 +66,25 @@ module.exports = {
             division = soloQueueStats.rank;
             rank = `${tier} ${division}`;
             lpChange = currentLP - (account.lastLP || 0);
+
+            // Update lastLP
             account.lastLP = currentLP;
+
+            // Update lpHistory
+            account.lpHistory = account.lpHistory || [];
+            account.lpHistory.push({
+              lp: currentLP,
+              timestamp: new Date(),
+              matchId: newMatches[0], // Latest match ID
+              lpChange: lpChange,
+              rank: rank,
+            });
+
+            // Limit lpHistory length
+            const maxHistoryLength = 100;
+            if (account.lpHistory.length > maxHistoryLength) {
+              account.lpHistory.shift();
+            }
           }
 
           // Save account updates
@@ -115,15 +133,35 @@ module.exports = {
                 lpChange > 0
                   ? '🔼' // Up arrow for LP gain
                   : lpChange < 0
-                    ? '🔽' // Down arrow for LP loss
-                    : '⏺️'; // Dot for no change
-              lpChangeText = `${lpChangeEmoji} ${lpChange > 0 ? '+' : ''}${lpChange} LP`;
+                  ? '🔽' // Down arrow for LP loss
+                  : '⏺️'; // Dot for no change
+              lpChangeText = `${lpChangeEmoji} ${
+                lpChange > 0 ? '+' : ''
+              }${lpChange} LP`;
             }
 
             // LP Progress Bar
             const lpProgressBar = createProgressBar(currentLP % 100, 100, 10);
-            const maxCsPerMinute = 10; // You can adjust this value
-            const csProgressBar = createProgressBar(csPerMinute, maxCsPerMinute, 10);
+            const maxCsPerMinute = 10; // Adjust as needed
+            const csProgressBar = createProgressBar(
+              csPerMinute,
+              maxCsPerMinute,
+              10
+            );
+
+            // Get the last 5 LP records
+            const recentLpHistory = account.lpHistory.slice(-5);
+
+            // Create a string representation
+            const lpHistoryString = recentLpHistory
+              .map(
+                (record) =>
+                  `${formatDateTime(record.timestamp)}: ${
+                    record.lp
+                  } LP (${record.lpChange > 0 ? '+' : ''}${record.lpChange} LP)`
+              )
+              .join('\n');
+
             // Create the embed
             const embed = new EmbedBuilder()
               .setColor(participant.win ? '#00FF00' : '#FF0000')
@@ -149,7 +187,7 @@ module.exports = {
                 },
                 {
                   name: 'CS per Minute',
-                  value: `📈 ${csPerMinute} cs/min\n${csProgressBar}`, // Added CS per minute with progress bar
+                  value: `📈 ${csPerMinute} cs/min\n${csProgressBar}`,
                   inline: true,
                 },
                 {
@@ -174,11 +212,13 @@ module.exports = {
                 const guild = await client.guilds.fetch(guildId);
                 const channel = await guild.channels.fetch(channelId);
                 if (channel) {
-                  await channel.send({ embeds: [embed] }).catch((err) => {
-                    logger.error(
-                      `Failed to send message to channel ${channelId}: ${err.message}`
-                    );
-                  });
+                  await channel
+                    .send({ embeds: [embed] })
+                    .catch((err) => {
+                      logger.error(
+                        `Failed to send message to channel ${channelId}: ${err.message}`
+                      );
+                    });
                 } else {
                   logger.warn(`Channel not found: ${channelId}`);
                 }
@@ -202,25 +242,32 @@ module.exports = {
       }
     }
 
-    // Helper function to capitalize the first letter
+    // Helper functions
     function capitalizeFirstLetter(string) {
       return string.charAt(0).toUpperCase() + string.slice(1);
     }
 
-    // Helper function to format game duration
     function formatGameDuration(seconds) {
       const minutes = Math.floor(seconds / 60);
       const secs = seconds % 60;
       return `${minutes}m ${secs}s`;
     }
 
-    // Helper function to create a progress bar
     function createProgressBar(value, maxValue, size) {
       const percentage = Math.min(value / maxValue, 1);
       const filledBars = Math.round(size * percentage);
       const emptyBars = size - filledBars;
       const progressBar = '█'.repeat(filledBars) + '░'.repeat(emptyBars);
       return `\`${progressBar}\` ${Math.round(percentage * 100)}%`;
+    }
+
+    function formatDateTime(date) {
+      return new Date(date).toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+      });
     }
   },
 };

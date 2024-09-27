@@ -13,7 +13,7 @@ module.exports = {
     name: 'addaccount',
     description: 'Add a League of Legends account to track',
   },
-  /**
+    /**
    * Execute the add account command with updated LP tracking.
    * @param {Message} message
    * @param {string[]} args
@@ -27,9 +27,10 @@ module.exports = {
           PermissionsBitField.Flags.ManageMessages
         )
       ) {
-        return message.reply(
+        await message.reply(
           '❌ I need the **Manage Messages** permission to delete messages.'
         );
+        return;
       }
 
       // Check if all required arguments are provided
@@ -38,7 +39,7 @@ module.exports = {
           '❌ Usage: `!addaccount <GameName> <TagLine> <Region>`\nExample: `!addaccount SummonerName 1234 euw`'
         );
         // Delete the user's command message after sending the usage message
-        await message.delete().catch(console.error);
+        await safeDeleteMessage(message);
         return;
       }
 
@@ -65,7 +66,7 @@ module.exports = {
           `❌ Invalid server. Valid servers are: ${validRegions.join(', ')}`
         );
         // Delete the user's command message after sending the error message
-        await message.delete().catch(console.error);
+        await safeDeleteMessage(message);
         return;
       }
 
@@ -89,10 +90,10 @@ module.exports = {
       });
 
       if (existingAccount) {
-        await processingMessage.delete().catch(console.error);
+        await safeDeleteMessage(processingMessage);
         await message.reply('⚠️ This account is already being tracked.');
         // Delete the user's command message
-        await message.delete().catch(console.error);
+        await safeDeleteMessage(message);
         return;
       }
 
@@ -135,8 +136,8 @@ module.exports = {
       await account.save();
 
       // Delete the processing message and the user's command message
-      await processingMessage.delete().catch(console.error);
-      await message.delete().catch(console.error);
+      await safeDeleteMessage(processingMessage);
+      await safeDeleteMessage(message);
 
       // Send a detailed confirmation message using an embed
       const confirmationEmbed = new EmbedBuilder()
@@ -159,25 +160,50 @@ module.exports = {
 
       await message.channel.send({ embeds: [confirmationEmbed] });
     } catch (error) {
-      logger.error(`Error in addAccount command: ${error}`);
-      // Delete the processing message and the user's command message
-      await message.delete().catch(console.error);
-      await processingMessage?.delete().catch(console.error);
+      logger.error(`Error in addAccount command: ${error.stack || error}`);
 
-      if (error.response && error.response.status === 404) {
-        await message.reply(
-          '❌ Account not found. Please check the game name, tag line, and server.'
-        );
-      } else if (error.response && error.response.status === 403) {
-        await message.reply('❌ Invalid or expired Riot API key.');
+      // Safely delete messages
+      await safeDeleteMessage(processingMessage);
+      await safeDeleteMessage(message);
+
+      // Handle specific errors
+      let errorMessage = '❌ An error occurred while adding the account.';
+      if (error.response) {
+        if (error.response.status === 404) {
+          errorMessage = '❌ Account not found. Please check the game name, tag line, and server.';
+        } else if (error.response.status === 403) {
+          errorMessage = '❌ Invalid or expired Riot API key.';
+        }
+      }
+
+      // Safely reply to the user
+      if (message && message.channel) {
+        try {
+          await message.reply(errorMessage);
+        } catch (replyError) {
+          logger.error(`Failed to reply to message: ${replyError.message}`);
+        }
       } else {
-        await message.reply('❌ An error occurred while adding the account.');
+        logger.warn('Cannot reply to an invalid message object.');
       }
     }
 
     // Helper function to capitalize the first letter
     function capitalizeFirstLetter(string) {
       return string.charAt(0).toUpperCase() + string.slice(1);
+    }
+
+    // Helper function to safely delete a message
+    async function safeDeleteMessage(msg) {
+      if (msg && msg.deletable) {
+        try {
+          await msg.delete();
+        } catch (error) {
+          console.error(`Failed to delete message: ${error.message}`);
+        }
+      } else {
+        console.warn('Message is not deletable or does not exist.');
+      }
     }
   },
 };
