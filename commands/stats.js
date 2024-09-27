@@ -1,3 +1,4 @@
+// commands/stats.js
 const Account = require('../models/Account');
 const GuildSettings = require('../models/GuildSettings');
 const { EmbedBuilder } = require('discord.js');
@@ -7,27 +8,6 @@ const {
   getRankedStats,
 } = require('../utils/riotApi');
 const logger = require('../utils/logger');
-
-// Tier and Division mappings
-const tierOrder = {
-  IRON: 0,
-  BRONZE: 1,
-  SILVER: 2,
-  GOLD: 3,
-  PLATINUM: 4,
-  DIAMOND: 5,
-  MASTER: 6,
-  GRANDMASTER: 7,
-  CHALLENGER: 8,
-  UNRANKED: -1,
-};
-
-const divisionOrder = {
-  IV: 0,
-  III: 1,
-  II: 2,
-  I: 3,
-};
 
 module.exports = {
   data: {
@@ -54,6 +34,15 @@ module.exports = {
       for (const account of accounts) {
         const { region, puuid, summonerId, gameName, tagLine } = account;
 
+        // Get last LP and rank from lpHistory
+        const lastRecord =
+          account.lpHistory && account.lpHistory.length > 0
+            ? account.lpHistory[account.lpHistory.length - 1]
+            : null;
+
+        let lastLP = lastRecord ? lastRecord.lp : null;
+        let lastRank = lastRecord ? lastRecord.rank : 'Unranked';
+
         // Fetch match history, filtering for ranked solo/duo games
         const matchHistory = await getMatchHistory(puuid, region, 'ranked');
 
@@ -68,86 +57,6 @@ module.exports = {
         if (newMatches.length > 0) {
           // Update lastMatchId
           account.lastMatchId = newMatches[0];
-
-          // Fetch current LP and rank
-          const rankedStats = await getRankedStats(summonerId, region);
-          const soloQueueStats = rankedStats.find(
-            (queue) => queue.queueType === 'RANKED_SOLO_5x5'
-          );
-
-          let currentLP = 0;
-          let currentTier = 'UNRANKED';
-          let currentDivision = '';
-          let rank = 'Unranked';
-          let lpChange = null;
-
-          if (soloQueueStats) {
-            currentLP = soloQueueStats.leaguePoints;
-            currentTier = soloQueueStats.tier.toUpperCase();
-            currentDivision = soloQueueStats.rank.toUpperCase();
-            rank = `${capitalizeFirstLetter(currentTier.toLowerCase())} ${currentDivision}`;
-
-            const currentTotalLP = calculateTotalLP(
-              currentTier,
-              currentDivision,
-              currentLP
-            );
-
-            // Retrieve last known rank details from the account
-            const lastLP = account.lastLP || 0;
-            const lastTier = account.lastTier || 'UNRANKED';
-            const lastDivision = account.lastDivision || 'IV';
-
-            const lastTotalLP = calculateTotalLP(
-              lastTier,
-              lastDivision,
-              lastLP
-            );
-
-            lpChange = currentTotalLP - lastTotalLP;
-
-            // Update account with current rank details
-            account.lastLP = currentLP;
-            account.lastTier = currentTier;
-            account.lastDivision = currentDivision;
-
-            // Update lpHistory
-            account.lpHistory = account.lpHistory || [];
-            account.lpHistory.push({
-              lp: currentLP,
-              timestamp: new Date(),
-              matchId: newMatches[0],
-              lpChange: lpChange,
-              rank: rank,
-            });
-
-            // Limit lpHistory length
-            const maxHistoryLength = 100;
-            if (account.lpHistory.length > maxHistoryLength) {
-              account.lpHistory.shift();
-            }
-          } else {
-            // Handle unranked players
-            const currentTotalLP = 0;
-            const lastLP = account.lastLP || 0;
-            const lastTier = account.lastTier || 'UNRANKED';
-            const lastDivision = account.lastDivision || '';
-            const lastTotalLP = calculateTotalLP(
-              lastTier,
-              lastDivision,
-              lastLP
-            );
-
-            lpChange = currentTotalLP - lastTotalLP;
-
-            // Update account with current rank details
-            account.lastLP = currentLP;
-            account.lastTier = currentTier;
-            account.lastDivision = currentDivision;
-          }
-
-          // Save account updates
-          await account.save();
 
           // Fetch and report new matches
           for (const matchId of newMatches.reverse()) {
@@ -168,21 +77,54 @@ module.exports = {
             const result = participant.win ? 'Victory' : 'Defeat';
             const championName = participant.championName;
 
-            // Additional stats
-            const cs =
-              participant.totalMinionsKilled + participant.neutralMinionsKilled;
-            const csPerMinute = (
-              cs /
-              (matchDetails.info.gameDuration / 60)
-            ).toFixed(1);
-            const visionScore = participant.visionScore;
-            const killParticipation = (
-              ((participant.kills + participant.assists) /
-                matchDetails.info.teams.find(
-                  (t) => t.teamId === participant.teamId
-                ).objectives.champion.kills) *
-              100
-            ).toFixed(1);
+            // Fetch current LP and rank after the match
+            const rankedStats = await getRankedStats(summonerId, region);
+            const soloQueueStats = rankedStats.find(
+              (queue) => queue.queueType === 'RANKED_SOLO_5x5'
+            );
+
+            let currentLP = 0;
+            let currentRank = 'Unranked';
+
+            if (soloQueueStats) {
+              currentLP = soloQueueStats.leaguePoints;
+              const currentTier = soloQueueStats.tier;
+              const currentDivision = soloQueueStats.rank;
+              currentRank = `${capitalizeFirstLetter(
+                currentTier.toLowerCase()
+              )} ${currentDivision}`;
+            }
+
+            // Calculate LP change
+            let lpChange = null;
+
+            if (lastLP !== null) {
+              const lastRankParsed = parseRank(lastRank);
+              const currentRankParsed = parseRank(currentRank);
+
+              const lastRankValue = getRankValue(
+                lastRankParsed.tier,
+                lastRankParsed.division
+              );
+              const currentRankValue = getRankValue(
+                currentRankParsed.tier,
+                currentRankParsed.division
+              );
+
+              if (currentRankValue > lastRankValue) {
+                // Player promoted
+                lpChange = 100 - lastLP + currentLP;
+              } else if (currentRankValue < lastRankValue) {
+                // Player demoted
+                lpChange = -lastLP - (100 - currentLP);
+              } else {
+                // Same rank
+                lpChange = currentLP - lastLP;
+              }
+            } else {
+              // No previous LP, cannot calculate lpChange
+              lpChange = null;
+            }
 
             // LP Change Indicator
             let lpChangeText = 'N/A';
@@ -199,6 +141,22 @@ module.exports = {
               }${lpChange} LP`;
             }
 
+            // Additional stats
+            const cs =
+              participant.totalMinionsKilled + participant.neutralMinionsKilled;
+            const csPerMinute = (
+              cs /
+              (matchDetails.info.gameDuration / 60)
+            ).toFixed(1);
+            const visionScore = participant.visionScore;
+            const killParticipation = (
+              ((participant.kills + participant.assists) /
+                matchDetails.info.teams.find(
+                  (t) => t.teamId === participant.teamId
+                ).objectives.champion.kills) *
+              100
+            ).toFixed(1);
+
             // LP Progress Bar
             const lpProgressBar = createProgressBar(currentLP % 100, 100, 10);
             const maxCsPerMinute = 10; // Adjust as needed
@@ -208,25 +166,12 @@ module.exports = {
               10
             );
 
-            // Get the last 5 LP records
-            const recentLpHistory = account.lpHistory.slice(-5);
-
-            // Create a string representation
-            const lpHistoryString = recentLpHistory
-              .map(
-                (record) =>
-                  `${formatDateTime(record.timestamp)}: ${
-                    record.lp
-                  } LP (${record.lpChange > 0 ? '+' : ''}${record.lpChange} LP)`
-              )
-              .join('\n');
-
             // Create the embed
             const embed = new EmbedBuilder()
               .setColor(participant.win ? '#00FF00' : '#FF0000')
               .setTitle(`${gameName}#${tagLine} - ${result}`)
               .setDescription(
-                `**Rank:** ${rank} (${currentLP} LP)\n**LP Change:** ${lpChangeText}\n**LP Progress:** ${lpProgressBar}`
+                `**Rank:** ${currentRank} (${currentLP} LP)\n**LP Change:** ${lpChangeText}\n**LP Progress:** ${lpProgressBar}`
               )
               .addFields(
                 {
@@ -254,6 +199,7 @@ module.exports = {
                   value: `👁️ ${visionScore}`,
                   inline: true,
                 }
+                // You commented out the LP history display
                 /*{
                   name: 'Recent LP History',
                   value: lpHistoryString || 'No LP history available.',
@@ -290,7 +236,30 @@ module.exports = {
                 );
               }
             }
+
+            // Update lpHistory
+            account.lpHistory = account.lpHistory || [];
+            account.lpHistory.push({
+              lp: currentLP,
+              timestamp: new Date(),
+              matchId: matchId,
+              lpChange: lpChange,
+              rank: currentRank,
+            });
+
+            // Limit lpHistory length
+            const maxHistoryLength = 100;
+            if (account.lpHistory.length > maxHistoryLength) {
+              account.lpHistory.shift();
+            }
+
+            // Update lastLP and lastRank for the next iteration
+            lastLP = currentLP;
+            lastRank = currentRank;
           }
+
+          // Save account updates
+          await account.save();
         }
       }
 
@@ -332,22 +301,46 @@ module.exports = {
       });
     }
 
-    function calculateTotalLP(tier, division, lp) {
-      const tierIndex = tierOrder[tier.toUpperCase()] || -1;
-      let totalLP = 0;
-
-      if (tierIndex >= 0 && tierIndex <= 5 && division) {
-        const divisionIndex = divisionOrder[division.toUpperCase()] || 0;
-        totalLP = tierIndex * 400 + divisionIndex * 100 + lp;
-      } else if (tierIndex >= 6) {
-        // For Master and above, divisions don't exist
-        totalLP = tierIndex * 400 + lp;
-      } else {
-        // Unranked or invalid tier
-        totalLP = 0;
+    function parseRank(rankStr) {
+      if (!rankStr || rankStr === 'Unranked') {
+        return { tier: 'Unranked', division: '' };
       }
 
-      return totalLP;
+      const [tier, division] = rankStr.split(' ');
+      return { tier: capitalizeFirstLetter(tier.toLowerCase()), division };
+    }
+
+    function getRankValue(tier, division) {
+      const tierValues = {
+        Iron: 0,
+        Bronze: 1,
+        Silver: 2,
+        Gold: 3,
+        Platinum: 4,
+        Diamond: 5,
+        Master: 6,
+        Grandmaster: 7,
+        Challenger: 8,
+        Unranked: -1,
+      };
+
+      const divisionValues = {
+        IV: 0,
+        III: 1,
+        II: 2,
+        I: 3,
+        '': 4, // For tiers without divisions (Master+)
+      };
+
+      const tierValue = tierValues[tier] !== undefined ? tierValues[tier] : -1;
+      const divisionValue =
+        divisionValues[division] !== undefined ? divisionValues[division] : 0;
+
+      if (tierValue === -1) {
+        return -1;
+      }
+
+      return tierValue * 4 + divisionValue;
     }
   },
 };
