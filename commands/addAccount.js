@@ -13,7 +13,7 @@ module.exports = {
     name: 'addaccount',
     description: 'Add a League of Legends account to track',
   },
-    /**
+  /**
    * Execute the add account command with updated LP tracking.
    * @param {Message} message
    * @param {string[]} args
@@ -170,7 +170,8 @@ module.exports = {
       let errorMessage = '❌ An error occurred while adding the account.';
       if (error.response) {
         if (error.response.status === 404) {
-          errorMessage = '❌ Account not found. Please check the game name, tag line, and server.';
+          errorMessage =
+            '❌ Account not found. Please check the game name, tag line, and server.';
         } else if (error.response.status === 403) {
           errorMessage = '❌ Invalid or expired Riot API key.';
         }

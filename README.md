@@ -1,4 +1,3 @@
-
 <div align="center">
     <h1>LP SVIZEC</h1>
     <h3>Discord bot for tracking Match history and LP changes</h3>
@@ -20,8 +19,8 @@
 - [📂 Repository Structure](#-repository-structure)
 - [⚙️ Modules](#modules)
 - [🚀 Getting Started](#-getting-started)
-    - [🔧 Installation](#-installation)
-    - [🤖 Running {{PROJECT_NAME}}](#-running-{{PROJECT_NAME}})
+  - [🔧 Installation](#-installation)
+  - [🤖 Running {{PROJECT_NAME}}](#-running-{{PROJECT_NAME}})
 - [🛣 Roadmap](#-roadmap)
 - [🤝 Contributing](#-contributing)
 - [👏 Acknowledgments](#-acknowledgments)
@@ -105,22 +104,26 @@ logger.js	Logging utility using Winston or similar
 ### 🔧 Installation
 
 1. Clone the repository:
+
 ```sh
 git clone https://github.com/sgtpolde/lp-svizec
 ```
 
 2. Change to the project directory:
+
 ```sh
 cd lp-svizec
 ```
 
 3. Install the dependencies:
+
 ```sh
 npm install
 ```
 
 ### 🤖 Running {{PROJECT_NAME}}
-  Create a .env file in the root directory and add your configuration:
+
+Create a .env file in the root directory and add your configuration:
 
     DISCORD_TOKEN=your_discord_bot_token
     RIOT_API_KEY=your_riot_api_key
@@ -136,7 +139,7 @@ npm start
 
 ## 🛣 Roadmap
 
-> - [X] `Completed tasks`
+> - [x] `Completed tasks`
 > - [ ] `Upcoming features`
 
 ---
@@ -166,8 +169,6 @@ Follow these steps to contribute:
      CommunityDragon: For providing game assets.
      Contributors and the open-source community.
 
-
-
 Levels in Order of Priority (Lowest to Highest Severity):
 
     silly (lowest severity)
@@ -181,4 +182,3 @@ Levels in Order of Priority (Lowest to Highest Severity):
 
     If the log level is set to info, then messages with levels info, warn, and error will be logged.
     Messages with levels verbose, debug, and silly will be ignored.
-
