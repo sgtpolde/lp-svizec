@@ -85,8 +85,17 @@ module.exports = {
 
             let currentLP = 0;
             let currentRank = 'Unranked';
+            let totalGames = 0;
+            let totalWins = 0;
+            let totalLosses = 0;
+            let winPercentage = 0;
 
             if (soloQueueStats) {
+              totalWins = soloQueueStats.wins;
+              totalLosses = soloQueueStats.losses;
+              totalGames = totalWins + totalLosses;
+              winPercentage = totalGames > 0 ? ((totalWins / totalGames) * 100).toFixed(2) : 0;
+
               currentLP = soloQueueStats.leaguePoints;
               const currentTier = soloQueueStats.tier;
               const currentDivision = soloQueueStats.rank;
@@ -157,8 +166,6 @@ module.exports = {
               100
             ).toFixed(1);
 
-            // LP Progress Bar
-            const lpProgressBar = createProgressBar(currentLP % 100, 100, 10);
             const maxCsPerMinute = 10; // Adjust as needed
             const csProgressBar = createProgressBar(
               csPerMinute,
@@ -171,7 +178,7 @@ module.exports = {
               .setColor(participant.win ? '#00FF00' : '#FF0000')
               .setTitle(`${gameName}#${tagLine} - ${result}`)
               .setDescription(
-                `**Rank:** ${currentRank} (${currentLP} LP)\n**LP Change:** ${lpChangeText}\n**LP Progress:** ${lpProgressBar}`
+                `**Rank:** ${currentRank} (${currentLP} LP)\n**LP Change:** ${lpChangeText}\n**Winrate:** (${totalWins} - ${totalLosses}) | ${winPercentage}%`
               )
               .addFields(
                 {
@@ -199,12 +206,6 @@ module.exports = {
                   value: `👁️ ${visionScore}`,
                   inline: true,
                 }
-                // You commented out the LP history display
-                /*{
-                  name: 'Recent LP History',
-                  value: lpHistoryString || 'No LP history available.',
-                  inline: false,
-                }*/
               )
               .setThumbnail(
                 `https://ddragon.leagueoflegends.com/cdn/13.21.1/img/champion/${championName}.png`
@@ -248,7 +249,7 @@ module.exports = {
             });
 
             // Limit lpHistory length
-            const maxHistoryLength = 100;
+            const maxHistoryLength = 200;
             if (account.lpHistory.length > maxHistoryLength) {
               account.lpHistory.shift();
             }
