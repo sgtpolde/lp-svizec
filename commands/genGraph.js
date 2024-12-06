@@ -1,3 +1,4 @@
+// commands/gengraph.js
 const { generateLPGraph } = require('../utils/generateImage');
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const Account = require('../models/Account');
@@ -21,13 +22,14 @@ module.exports = {
         return message.reply('❌ No account found for the given summoner name.');
       }
 
-      // Generate LP graph
-      const lpGraphBuffer = await generateLPGraph(account.lpHistory || []);
+      if (!account.lpHistory || account.lpHistory.length === 0) {
+        return message.reply('No LP history found for this account.');
+      }
 
-      // Create an attachment for the graph
+      const lpGraphBuffer = await generateLPGraph(account.lpHistory);
+
       const attachment = new AttachmentBuilder(lpGraphBuffer, { name: 'lp-graph.png' });
 
-      // Create an embed to show the summoner info
       const embed = new EmbedBuilder()
         .setColor('#0099ff')
         .setTitle(`${account.gameName}#${account.tagLine} - LP Graph`)
@@ -35,7 +37,6 @@ module.exports = {
         .setImage('attachment://lp-graph.png')
         .setTimestamp();
 
-      // Send the embed with the graph
       await message.reply({ embeds: [embed], files: [attachment] });
     } catch (error) {
       console.error(error);

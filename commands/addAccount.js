@@ -14,31 +14,25 @@ module.exports = {
     description: 'Add a League of Legends account to track',
   },
   /**
-   * Execute the add account command with updated LP tracking.
-   * @param {Message} message
+   * Execute the addAccount command.
+   * @param {import('discord.js').Message} message
    * @param {string[]} args
-   * @param {Client} client
+   * @param {import('discord.js').Client} client
    */
   async execute(message, args, client) {
+    let processingMessage;
     try {
-      // Check if the bot has permission to manage messages
-      if (
-        !message.guild.members.me.permissions.has(
-          PermissionsBitField.Flags.ManageMessages
-        )
-      ) {
-        await message.reply(
-          '❌ I need the **Manage Messages** permission to delete messages.'
-        );
+      // Check bot permissions
+      if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+        await message.reply('❌ I need the **Manage Messages** permission to delete messages.');
         return;
       }
 
-      // Check if all required arguments are provided
+      // Validate arguments
       if (args.length < 3) {
         await message.reply(
           '❌ Usage: `!addaccount <GameName> <TagLine> <Region>`\nExample: `!addaccount SummonerName 1234 euw`'
         );
-        // Delete the user's command message after sending the usage message
         await safeDeleteMessage(message);
         return;
       }
@@ -46,43 +40,27 @@ module.exports = {
       const [gameName, tagLine, regionInput] = args;
       const region = regionInput.toLowerCase();
 
-      // Validate region
       const validRegions = [
-        'na',
-        'euw',
-        'eun',
-        'kr',
-        'jp',
-        'oce',
-        'br',
-        'lan',
-        'las',
-        'ru',
-        'tr',
+        'na', 'euw', 'eun', 'kr', 'jp', 'oce', 'br', 'lan', 'las', 'ru', 'tr',
       ];
 
       if (!validRegions.includes(region)) {
-        await message.reply(
-          `❌ Invalid server. Valid servers are: ${validRegions.join(', ')}`
-        );
-        // Delete the user's command message after sending the error message
+        await message.reply(`❌ Invalid server. Valid servers: ${validRegions.join(', ')}`);
         await safeDeleteMessage(message);
         return;
       }
 
-      // Inform the user that we're processing their account
-      const processingMessage = await message.channel.send(
-        '🔄 Processing your account. Please wait...'
-      );
+      // Indicate processing
+      processingMessage = await message.channel.send('🔄 Processing your account. Please wait...');
 
-      // Get PUUID using Riot ID
+      // Fetch account data
       const accountData = await getPUUIDByRiotID(gameName, tagLine);
       const puuid = accountData.puuid;
 
-      // Get Summoner data using PUUID and region
+      // Summoner data
       const summonerData = await getSummonerByPUUID(puuid, region);
 
-      // Check if the account already exists
+      // Check if account already tracked
       const existingAccount = await Account.findOne({
         discordId: message.author.id,
         puuid,
@@ -92,32 +70,25 @@ module.exports = {
       if (existingAccount) {
         await safeDeleteMessage(processingMessage);
         await message.reply('⚠️ This account is already being tracked.');
-        // Delete the user's command message
         await safeDeleteMessage(message);
         return;
       }
 
-      // Get current LP and rank
+      // Get LP and rank
       const rankedStats = await getRankedStats(summonerData.id, region);
-      const soloQueueStats = rankedStats.find(
-        (queue) => queue.queueType === 'RANKED_SOLO_5x5'
-      );
+      const soloQueueStats = rankedStats.find((queue) => queue.queueType === 'RANKED_SOLO_5x5');
 
       let lastLP = null;
       let rank = 'Unranked';
-      let lpHistory = [];
+      const lpHistory = [];
 
       if (soloQueueStats) {
         lastLP = soloQueueStats.leaguePoints;
-        rank = `${capitalizeFirstLetter(
-          soloQueueStats.tier.toLowerCase()
-        )} ${soloQueueStats.rank}`;
-
-        // Initialize lpHistory with the current LP record
+        rank = `${capitalizeFirstLetter(soloQueueStats.tier.toLowerCase())} ${soloQueueStats.rank}`;
         lpHistory.push({
           lp: lastLP,
           timestamp: new Date(),
-          rank: rank,
+          rank,
         });
       }
 
@@ -130,18 +101,18 @@ module.exports = {
         summonerId: summonerData.id,
         lastMatchId: null,
         lastLP,
-        lpHistory, // Include the lpHistory array
+        lpHistory,
       });
 
       await account.save();
 
-      // Delete the processing message and the user's command message
+      // Clean up
       await safeDeleteMessage(processingMessage);
       await safeDeleteMessage(message);
 
-      // Send a detailed confirmation message using an embed
+      // Confirmation embed
       const confirmationEmbed = new EmbedBuilder()
-        .setColor('#00FF00') // Green color
+        .setColor('#00FF00')
         .setTitle('✅ Account Added Successfully!')
         .addFields(
           { name: 'Riot ID', value: `${gameName}#${tagLine}`, inline: true },
@@ -161,50 +132,48 @@ module.exports = {
       await message.channel.send({ embeds: [confirmationEmbed] });
     } catch (error) {
       logger.error(`Error in addAccount command: ${error.stack || error}`);
-
-      // Safely delete messages
       await safeDeleteMessage(processingMessage);
       await safeDeleteMessage(message);
 
-      // Handle specific errors
       let errorMessage = '❌ An error occurred while adding the account.';
       if (error.response) {
         if (error.response.status === 404) {
-          errorMessage =
-            '❌ Account not found. Please check the game name, tag line, and server.';
+          errorMessage = '❌ Account not found. Check the name, tag, and server.';
         } else if (error.response.status === 403) {
           errorMessage = '❌ Invalid or expired Riot API key.';
         }
       }
 
-      // Safely reply to the user
       if (message && message.channel) {
         try {
           await message.reply(errorMessage);
         } catch (replyError) {
-          logger.error(`Failed to reply to message: ${replyError.message}`);
+          logger.error(`Failed to reply: ${replyError.message}`);
         }
-      } else {
-        logger.warn('Cannot reply to an invalid message object.');
-      }
-    }
-
-    // Helper function to capitalize the first letter
-    function capitalizeFirstLetter(string) {
-      return string.charAt(0).toUpperCase() + string.slice(1);
-    }
-
-    // Helper function to safely delete a message
-    async function safeDeleteMessage(msg) {
-      if (msg && msg.deletable) {
-        try {
-          await msg.delete();
-        } catch (error) {
-          console.error(`Failed to delete message: ${error.message}`);
-        }
-      } else {
-        console.warn('Message is not deletable or does not exist.');
       }
     }
   },
 };
+
+/**
+ * Safely delete a message if possible.
+ * @param {import('discord.js').Message} msg
+ */
+async function safeDeleteMessage(msg) {
+  if (msg && msg.deletable) {
+    try {
+      await msg.delete();
+    } catch (error) {
+      logger.warn(`Failed to delete message: ${error.message}`);
+    }
+  }
+}
+
+/**
+ * Capitalize the first letter of a string.
+ * @param {string} string
+ * @returns {string}
+ */
+function capitalizeFirstLetter(string) {
+  return string.charAt(0).toUpperCase() + string.slice(1);
+}

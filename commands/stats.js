@@ -6,6 +6,7 @@ const {
   getMatchHistory,
   getMatchDetails,
   getRankedStats,
+  isApiKeyValid,
 } = require('../utils/riotApi');
 const logger = require('../utils/logger');
 
@@ -16,12 +17,24 @@ module.exports = {
   },
   /**
    * Execute the stats command.
-   * @param {Message|null} message
+   * @param {import('discord.js').Message|null} message
    * @param {string[]|null} args
-   * @param {Client} client
+   * @param {import('discord.js').Client} client
    */
   async execute(message, args, client) {
     try {
+      // Check if the Riot API key is valid before proceeding
+      const validApiKey = await isApiKeyValid();
+      if (!validApiKey) {
+        logger.error('Riot API key invalid or expired. Cannot fetch stats.');
+        if (message) {
+          await message.reply(
+            '❌ Cannot fetch stats because the Riot API key is invalid or expired. Please update the API key.'
+          );
+        }
+        return;
+      }
+
       const accounts = await Account.find();
 
       // Fetch all guild settings
@@ -63,14 +76,11 @@ module.exports = {
             const matchDetails = await getMatchDetails(matchId, region);
 
             // Skip if the game mode is not ranked solo/duo
-            if (matchDetails.info.queueId !== 420) {
-              continue;
-            }
+            if (matchDetails.info.queueId !== 420) continue;
 
             const participant = matchDetails.info.participants.find(
               (p) => p.puuid === puuid
             );
-
             if (!participant) continue;
 
             const kda = `${participant.kills}/${participant.deaths}/${participant.assists}`;
@@ -85,7 +95,6 @@ module.exports = {
 
             let currentLP = 0;
             let currentRank = 'Unranked';
-            let totalGames = 0;
             let totalWins = 0;
             let totalLosses = 0;
             let winPercentage = 0;
@@ -93,8 +102,11 @@ module.exports = {
             if (soloQueueStats) {
               totalWins = soloQueueStats.wins;
               totalLosses = soloQueueStats.losses;
-              totalGames = totalWins + totalLosses;
-              winPercentage = totalGames > 0 ? ((totalWins / totalGames) * 100).toFixed(2) : 0;
+              const totalGames = totalWins + totalLosses;
+              winPercentage =
+                totalGames > 0
+                  ? ((totalWins / totalGames) * 100).toFixed(2)
+                  : 0;
 
               currentLP = soloQueueStats.leaguePoints;
               const currentTier = soloQueueStats.tier;
@@ -106,7 +118,6 @@ module.exports = {
 
             // Calculate LP change
             let lpChange = null;
-
             if (lastLP !== null) {
               const lastRankParsed = parseRank(lastRank);
               const currentRankParsed = parseRank(currentRank);
@@ -121,18 +132,15 @@ module.exports = {
               );
 
               if (currentRankValue > lastRankValue) {
-                // Player promoted
+                // Promotion
                 lpChange = 100 - lastLP + currentLP;
               } else if (currentRankValue < lastRankValue) {
-                // Player demoted
+                // Demotion
                 lpChange = -lastLP - (100 - currentLP);
               } else {
                 // Same rank
                 lpChange = currentLP - lastLP;
               }
-            } else {
-              // No previous LP, cannot calculate lpChange
-              lpChange = null;
             }
 
             // LP Change Indicator
@@ -141,10 +149,10 @@ module.exports = {
             if (lpChange !== null) {
               lpChangeEmoji =
                 lpChange > 0
-                  ? '🔼' // Up arrow for LP gain
+                  ? '🔼'
                   : lpChange < 0
-                    ? '🔽' // Down arrow for LP loss
-                    : '⏺️'; // Dot for no change
+                  ? '🔽'
+                  : '⏺️';
               lpChangeText = `${lpChangeEmoji} ${
                 lpChange > 0 ? '+' : ''
               }${lpChange} LP`;
@@ -166,12 +174,7 @@ module.exports = {
               100
             ).toFixed(1);
 
-            const maxCsPerMinute = 10; // Adjust as needed
-            const csProgressBar = createProgressBar(
-              csPerMinute,
-              maxCsPerMinute,
-              10
-            );
+            const csProgressBar = createProgressBar(csPerMinute, 10, 10);
 
             // Create the embed
             const embed = new EmbedBuilder()
@@ -293,20 +296,10 @@ module.exports = {
       return `\`${progressBar}\` ${Math.round(percentage * 100)}%`;
     }
 
-    function formatDateTime(date) {
-      return new Date(date).toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: 'numeric',
-      });
-    }
-
     function parseRank(rankStr) {
       if (!rankStr || rankStr === 'Unranked') {
         return { tier: 'Unranked', division: '' };
       }
-
       const [tier, division] = rankStr.split(' ');
       return { tier: capitalizeFirstLetter(tier.toLowerCase()), division };
     }
@@ -333,7 +326,8 @@ module.exports = {
         '': 4, // For tiers without divisions (Master+)
       };
 
-      const tierValue = tierValues[tier] !== undefined ? tierValues[tier] : -1;
+      const tierValue =
+        tierValues[tier] !== undefined ? tierValues[tier] : -1;
       const divisionValue =
         divisionValues[division] !== undefined ? divisionValues[division] : 0;
 
