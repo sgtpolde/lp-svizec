@@ -23,7 +23,6 @@ module.exports = {
    */
   async execute(message, args, client) {
     try {
-      // Check if the Riot API key is valid before proceeding
       const validApiKey = await isApiKeyValid();
       if (!validApiKey) {
         logger.error('Riot API key invalid or expired. Cannot fetch stats.');
@@ -36,8 +35,6 @@ module.exports = {
       }
 
       const accounts = await Account.find();
-
-      // Fetch all guild settings
       const guildSettings = await GuildSettings.find();
       const guildSettingsMap = new Map();
       guildSettings.forEach((setting) => {
@@ -47,7 +44,6 @@ module.exports = {
       for (const account of accounts) {
         const { region, puuid, summonerId, gameName, tagLine } = account;
 
-        // Get last LP and rank from lpHistory
         const lastRecord =
           account.lpHistory && account.lpHistory.length > 0
             ? account.lpHistory[account.lpHistory.length - 1]
@@ -56,26 +52,20 @@ module.exports = {
         let lastLP = lastRecord ? lastRecord.lp : null;
         let lastRank = lastRecord ? lastRecord.rank : 'Unranked';
 
-        // Fetch match history, filtering for ranked solo/duo games
         const matchHistory = await getMatchHistory(puuid, region, 'ranked');
-
         const newMatches = [];
 
-        // Check for new matches
         for (const matchId of matchHistory) {
           if (matchId === account.lastMatchId) break;
           newMatches.push(matchId);
         }
 
         if (newMatches.length > 0) {
-          // Update lastMatchId
           account.lastMatchId = newMatches[0];
 
-          // Fetch and report new matches
           for (const matchId of newMatches.reverse()) {
             const matchDetails = await getMatchDetails(matchId, region);
 
-            // Skip if the game mode is not ranked solo/duo
             if (matchDetails.info.queueId !== 420) continue;
 
             const participant = matchDetails.info.participants.find(
@@ -87,7 +77,6 @@ module.exports = {
             const result = participant.win ? 'Victory' : 'Defeat';
             const championName = participant.championName;
 
-            // Fetch current LP and rank after the match
             const rankedStats = await getRankedStats(summonerId, region);
             const soloQueueStats = rankedStats.find(
               (queue) => queue.queueType === 'RANKED_SOLO_5x5'
@@ -116,7 +105,6 @@ module.exports = {
               )} ${currentDivision}`;
             }
 
-            // Calculate LP change
             let lpChange = null;
             if (lastLP !== null) {
               const lastRankParsed = parseRank(lastRank);
@@ -132,18 +120,14 @@ module.exports = {
               );
 
               if (currentRankValue > lastRankValue) {
-                // Promotion
                 lpChange = 100 - lastLP + currentLP;
               } else if (currentRankValue < lastRankValue) {
-                // Demotion
                 lpChange = -lastLP - (100 - currentLP);
               } else {
-                // Same rank
                 lpChange = currentLP - lastLP;
               }
             }
 
-            // LP Change Indicator
             let lpChangeText = 'N/A';
             let lpChangeEmoji = '';
             if (lpChange !== null) {
@@ -158,7 +142,6 @@ module.exports = {
               }${lpChange} LP`;
             }
 
-            // Additional stats
             const cs =
               participant.totalMinionsKilled + participant.neutralMinionsKilled;
             const csPerMinute = (
@@ -176,7 +159,6 @@ module.exports = {
 
             const csProgressBar = createProgressBar(csPerMinute, 10, 10);
 
-            // Create the embed
             const embed = new EmbedBuilder()
               .setColor(participant.win ? '#00FF00' : '#FF0000')
               .setTitle(`${gameName}#${tagLine} - ${result}`)
@@ -220,7 +202,6 @@ module.exports = {
               })
               .setTimestamp();
 
-            // Send the embed to the initialized channel in each guild
             for (const [guildId, channelId] of guildSettingsMap.entries()) {
               try {
                 const guild = await client.guilds.fetch(guildId);
@@ -241,7 +222,6 @@ module.exports = {
               }
             }
 
-            // Update lpHistory
             account.lpHistory = account.lpHistory || [];
             account.lpHistory.push({
               lp: currentLP,
@@ -251,18 +231,15 @@ module.exports = {
               rank: currentRank,
             });
 
-            // Limit lpHistory length
             const maxHistoryLength = 200;
             if (account.lpHistory.length > maxHistoryLength) {
               account.lpHistory.shift();
             }
 
-            // Update lastLP and lastRank for the next iteration
             lastLP = currentLP;
             lastRank = currentRank;
           }
 
-          // Save account updates
           await account.save();
         }
       }
@@ -277,7 +254,6 @@ module.exports = {
       }
     }
 
-    // Helper functions
     function capitalizeFirstLetter(string) {
       return string.charAt(0).toUpperCase() + string.slice(1);
     }
@@ -311,10 +287,11 @@ module.exports = {
         Silver: 2,
         Gold: 3,
         Platinum: 4,
-        Diamond: 5,
-        Master: 6,
-        Grandmaster: 7,
-        Challenger: 8,
+        Emerald: 5,
+        Diamond: 6,
+        Master: 7,
+        Grandmaster: 8,
+        Challenger: 9,
         Unranked: -1,
       };
 
@@ -323,7 +300,7 @@ module.exports = {
         III: 1,
         II: 2,
         I: 3,
-        '': 4, // For tiers without divisions (Master+)
+        '': 4,
       };
 
       const tierValue =

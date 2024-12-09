@@ -15,6 +15,7 @@ const tierEmojis = {
   SILVER: '🥈',
   GOLD: '🥇',
   PLATINUM: '💎',
+  EMERALD: '🍀',  // Add an emoji if you want for Emerald
   DIAMOND: '🔷',
   MASTER: '🔮',
   GRANDMASTER: '🔥',
@@ -22,18 +23,13 @@ const tierEmojis = {
   UNRANKED: '❔',
 };
 
-const ENTRIES_PER_PAGE = 10;
+const ENTRIES_PER_PAGE = 20;
 
 module.exports = {
   data: {
     name: 'leaderboard',
     description: 'Display the leaderboard of tracked accounts',
   },
-  /**
-   * Execute the leaderboard command.
-   * @param {import('discord.js').Message} message
-   * @param {string[]} args
-   */
   async execute(message, args) {
     try {
       const accounts = await Account.find();
@@ -54,10 +50,9 @@ module.exports = {
 
       const sentMessage = await message.channel.send({ embeds: [embed], components: [row] });
 
-      // Create an interaction collector for the pagination buttons
       const collector = sentMessage.createMessageComponentCollector({
         componentType: ComponentType.Button,
-        time: 60_000, // 1 minute
+        time: 60_000,
       });
 
       collector.on('collect', async (interaction) => {
@@ -78,7 +73,6 @@ module.exports = {
       });
 
       collector.on('end', async () => {
-        // Disable buttons after time runs out
         const disabledRow = buildActionRow(currentPage, totalPages, true);
         await sentMessage.edit({ components: [disabledRow] });
       });
@@ -89,11 +83,6 @@ module.exports = {
   },
 };
 
-/**
- * Return a sorted array of account rankings.
- * @param {Array} accounts
- * @returns {Array}
- */
 function getSortedRankings(accounts) {
   const rankings = accounts.map((account) => {
     const { gameName, tagLine, region, lpHistory } = account;
@@ -134,13 +123,6 @@ function getSortedRankings(accounts) {
   return rankings;
 }
 
-/**
- * Build the leaderboard embed for a given page.
- * @param {Array} rankings
- * @param {number} page
- * @param {number} totalPages
- * @returns {EmbedBuilder}
- */
 function buildLeaderboardEmbed(rankings, page, totalPages) {
   const startIndex = (page - 1) * ENTRIES_PER_PAGE;
   const endIndex = startIndex + ENTRIES_PER_PAGE;
@@ -167,13 +149,6 @@ function buildLeaderboardEmbed(rankings, page, totalPages) {
     .setTimestamp();
 }
 
-/**
- * Build the action row containing the pagination buttons.
- * @param {number} page
- * @param {number} totalPages
- * @param {boolean} disabled
- * @returns {ActionRowBuilder<ButtonBuilder>}
- */
 function buildActionRow(page, totalPages, disabled = false) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -189,30 +164,19 @@ function buildActionRow(page, totalPages, disabled = false) {
   );
 }
 
-/**
- * Capitalize the first letter of a string.
- * @param {string} string
- * @returns {string}
- */
 function capitalizeFirstLetter(string) {
   return string.charAt(0).toUpperCase() + string.slice(1);
 }
 
-/**
- * Calculate a rank score based on tier, division, and LP.
- * Higher is better.
- * @param {string} tier
- * @param {string} division
- * @param {number} leaguePoints
- * @returns {number}
- */
 function getRankScore(tier, division, leaguePoints) {
+  // Insert Emerald between Platinum and Diamond
   const tiers = [
     'IRON',
     'BRONZE',
     'SILVER',
     'GOLD',
     'PLATINUM',
+    'EMERALD',
     'DIAMOND',
     'MASTER',
     'GRANDMASTER',
@@ -225,10 +189,13 @@ function getRankScore(tier, division, leaguePoints) {
   if (tierValue === -1) tierValue = -1;
 
   let divisionValue = 0;
-  if (tierValue >= 0 && tierValue <= 5) {
+  // IRON to EMERALD have divisions
+  // DIAMOND also have divisions (up to the code)
+  // MASTER, GRANDMASTER, CHALLENGER have no divisions (fixed value)
+  if (tierValue >= 0 && tierValue <= 6) {
     divisionValue = divisions[division] || 0;
-  } else if (tierValue >= 6) {
-    // MASTER, GRANDMASTER, CHALLENGER
+  } else if (tierValue >= 7) {
+    // MASTER(7), GRANDMASTER(8), CHALLENGER(9) have a fixed division value
     divisionValue = 5;
   }
 
