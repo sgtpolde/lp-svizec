@@ -15,7 +15,7 @@ const tierEmojis = {
   SILVER: '🥈',
   GOLD: '🥇',
   PLATINUM: '💎',
-  EMERALD: '🍀',  // Add an emoji if you want for Emerald
+  EMERALD: '🍀',
   DIAMOND: '🔷',
   MASTER: '🔮',
   GRANDMASTER: '🔥',
