@@ -1,66 +1,80 @@
 // events/messageCreate.js
-const { Collection } = require('discord.js');
-const logger = require('../utils/logger');
 
-const cooldowns = new Collection();
+const { Collection } = require('discord.js');
+const logger = require('../utils/logger').child({ label: 'events/messageCreate' });
+
+const COMMAND_PREFIX = process.env.COMMAND_PREFIX || '!';
+const DEFAULT_COOLDOWN_SEC = 3;
+const cooldowns = new Collection(); // commandName → userId → timestamp
 
 module.exports = {
   name: 'messageCreate',
   /**
-   * Event handler for "messageCreate" event.
-   * @param {Message} message
-   * @param {Client} client
+   * @param {import('discord.js').Message} message
+   * @param {import('discord.js').Client}  client
    */
   async execute(message, client) {
-    if (message.author.bot) return;
+    // -- Ignore bot & prefixless messages
+    if (message.author.bot || !message.content.startsWith(COMMAND_PREFIX)) return;
 
-    const COMMAND_PREFIX = process.env.COMMAND_PREFIX || '!';
-    if (!message.content.startsWith(COMMAND_PREFIX)) return;
+    // -- Parse command + args (quoted strings allowed)
+    const withoutPrefix = message.content.slice(COMMAND_PREFIX.length).trim();
+    const [commandName, ...args] = tokenize(withoutPrefix);
+    if (!commandName) return;
 
-    const args = message.content.slice(COMMAND_PREFIX.length).trim().split(/ +/);
-    const commandName = args.shift().toLowerCase();
-
-    logger.info(
-      `Command received: ${commandName} from ${message.author.tag} in ${message.channel.name} with args: ${args}`
-    );
-
-    const command = client.commands.get(commandName);
+    const command = client.commands.get(commandName.toLowerCase());
     if (!command) {
-      logger.warn(`No command found for "${commandName}"`);
+      logger.warn(`Unknown command "${commandName}" from ${message.author.tag}`);
       await message.reply(
         `I don't recognize the command \`${commandName}\`. Try \`${COMMAND_PREFIX}help\` for a list of commands.`
       );
       return;
     }
 
-    // Implement command cooldowns
-    if (!cooldowns.has(command.data.name)) {
-      cooldowns.set(command.data.name, new Collection());
-    }
-
+    // -- Cooldown check
     const now = Date.now();
-    const timestamps = cooldowns.get(command.data.name);
-    const cooldownAmount = (command.cooldown || 3) * 1000; // Default 3 seconds
+    const userTimestamps = cooldowns.ensure(command.data.name, () => new Collection());
+    const cooldownMs = (command.cooldown ?? DEFAULT_COOLDOWN_SEC) * 1000;
 
-    if (timestamps.has(message.author.id)) {
-      const expirationTime = timestamps.get(message.author.id) + cooldownAmount;
-      if (now < expirationTime) {
-        const timeLeft = ((expirationTime - now) / 1000).toFixed(1);
-        return message.reply(
-          `Please wait ${timeLeft} more second(s) before reusing the \`${command.data.name}\` command.`
-        );
-      }
+    const expiration = userTimestamps.get(message.author.id);
+    if (expiration && now < expiration) {
+      const timeLeft = ((expiration - now) / 1000).toFixed(1);
+      await message.reply(
+        `Please wait ${timeLeft}s before reusing the \`${command.data.name}\` command.`
+      );
+      return;
     }
-
-    timestamps.set(message.author.id, now);
-    setTimeout(() => timestamps.delete(message.author.id), cooldownAmount);
+    userTimestamps.set(message.author.id, now + cooldownMs);
 
     try {
+      logger.time(command.data.name); // start timer
       await command.execute(message, args, client);
-      logger.info(`Executed command: ${commandName}`);
-    } catch (error) {
-      logger.error(`Error executing command "${commandName}": ${error.message}`);
-      await message.reply('An unexpected error occurred while executing that command.');
+      logger.timeEnd(command.data.name, `Ran by ${message.author.tag}`);
+    } catch (err) {
+      logger.error(`Command "${command.data.name}" failed – ${err.stack || err}`);
+      await message.reply('❌  An unexpected error occurred while executing that command.');
     }
   },
+};
+
+// ----------------------------------------------------
+// helper – split string by spaces but keep quoted substrings intact
+// e.g.  \"Add My Name\" 1234 euw  → ["Add My Name", "1234", "euw"]
+// ----------------------------------------------------
+function tokenize(input) {
+  const tokens = [];
+  const regex = /"([^"]+)"|'([^']+)'|(\S+)/g;
+  let match;
+  while ((match = regex.exec(input)) !== null) {
+    tokens.push(match[1] || match[2] || match[3]);
+  }
+  return tokens;
+}
+
+// tiny util on Collection prototype
+Collection.prototype.ensure = function (key, factory) {
+  if (this.has(key)) return this.get(key);
+  const val = factory(key, this);
+  this.set(key, val);
+  return val;
 };

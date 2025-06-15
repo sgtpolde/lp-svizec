@@ -1,204 +1,148 @@
 // commands/leaderboard.js
 const Account = require('../models/Account');
-const { 
-  EmbedBuilder, 
-  ButtonBuilder, 
-  ButtonStyle, 
-  ActionRowBuilder, 
-  ComponentType 
+const GuildSettings = require('../models/GuildSettings');
+const {
+  EmbedBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ActionRowBuilder,
+  ComponentType,
 } = require('discord.js');
-const logger = require('../utils/logger');
+const { TIER_EMOJIS } = require('../utils/constants');
+const { capitalizeFirst } = require('../utils/helpers');
+const logger = require('../utils/logger').child({ label: 'commands/leaderboard' });
 
-const tierEmojis = {
-  IRON: '⚙️',
-  BRONZE: '🥉',
-  SILVER: '🥈',
-  GOLD: '🥇',
-  PLATINUM: '💎',
-  EMERALD: '🍀',
-  DIAMOND: '🔷',
-  MASTER: '🔮',
-  GRANDMASTER: '🔥',
-  CHALLENGER: '🏆',
-  UNRANKED: '❔',
-};
-
-const ENTRIES_PER_PAGE = 20;
+const ENTRIES = 20;
+const IDLE = 120_000; // 2 min
 
 module.exports = {
   data: {
     name: 'leaderboard',
-    description: 'Display the leaderboard of tracked accounts',
+    description: 'Show tracked‑account leaderboard',
   },
-  async execute(message, args) {
-    try {
-      const accounts = await Account.find();
 
-      if (accounts.length === 0) {
-        return message.reply('No accounts are being tracked yet.');
-      }
-
-      const rankings = getSortedRankings(accounts);
-
-      // Calculate total pages
-      const totalPages = Math.ceil(rankings.length / ENTRIES_PER_PAGE);
-      let currentPage = 1;
-
-      // Create initial embed and components
-      const embed = buildLeaderboardEmbed(rankings, currentPage, totalPages);
-      const row = buildActionRow(currentPage, totalPages);
-
-      const sentMessage = await message.channel.send({ embeds: [embed], components: [row] });
-
-      const collector = sentMessage.createMessageComponentCollector({
-        componentType: ComponentType.Button,
-        time: 60_000,
-      });
-
-      collector.on('collect', async (interaction) => {
-        if (interaction.user.id !== message.author.id) {
-          return interaction.reply({ content: 'You cannot control this leaderboard.', ephemeral: true });
-        }
-
-        if (interaction.customId === 'prev_page' && currentPage > 1) {
-          currentPage--;
-        } else if (interaction.customId === 'next_page' && currentPage < totalPages) {
-          currentPage++;
-        }
-
-        const updatedEmbed = buildLeaderboardEmbed(rankings, currentPage, totalPages);
-        const updatedRow = buildActionRow(currentPage, totalPages);
-
-        await interaction.update({ embeds: [updatedEmbed], components: [updatedRow] });
-      });
-
-      collector.on('end', async () => {
-        const disabledRow = buildActionRow(currentPage, totalPages, true);
-        await sentMessage.edit({ components: [disabledRow] });
-      });
-    } catch (error) {
-      logger.error(`Error generating leaderboard: ${error.stack || error}`);
-      await message.reply('❌ An error occurred while generating the leaderboard.');
+  /**
+   * @param {import('discord.js').Message | null} message
+   * @param {string[] | null} _args
+   * @param {import('discord.js').Client} client
+   */
+  async execute(message, _args, client) {
+    const accounts = await Account.find();
+    if (!accounts.length) {
+      if (message) await message.reply('No accounts are being tracked yet.');
+      return;
     }
+
+    const rankings = buildSortedRankings(accounts);
+    const pages = Math.ceil(rankings.length / ENTRIES);
+
+    // ─── Scheduled run (message == null) → broadcast single embed to every guild
+    if (!message) {
+      const embed = makeEmbed(rankings, 1, pages);
+      const settings = await GuildSettings.find();
+      for (const { guildId, channelId } of settings) {
+        try {
+          const chan = await client.channels.fetch(channelId);
+          if (chan?.isTextBased()) await chan.send({ embeds: [embed] });
+        } catch (e) {
+          logger.warn(`Broadcast to ${guildId}/${channelId} failed – ${e.message}`);
+        }
+      }
+      return;
+    }
+
+    // ─── Manual run (interactive pagination) ──────────────────────────────
+    let page = 1;
+    const sent = await message.channel.send({
+      embeds: [makeEmbed(rankings, page, pages)],
+      components: [makeRow(page, pages)],
+    });
+
+    const collector = sent.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      idle: IDLE,
+    });
+
+    collector.on('collect', async int => {
+      if (int.user.id !== message.author.id) {
+        await int.reply({ content: 'Only the command author can flip pages.', ephemeral: true });
+        return;
+      }
+      page += int.customId === 'next' ? 1 : -1;
+      page = Math.max(1, Math.min(page, pages));
+      await int.update({
+        embeds: [makeEmbed(rankings, page, pages)],
+        components: [makeRow(page, pages)],
+      });
+    });
+
+    collector.on('end', async () => {
+      try {
+        await sent.edit({ components: [makeRow(page, pages, true)] });
+      } catch {/* msg deleted */}
+    });
   },
 };
 
-function getSortedRankings(accounts) {
-  const rankings = accounts.map((account) => {
-    const { gameName, tagLine, region, lpHistory } = account;
-    const latestLPRecord =
-      lpHistory && lpHistory.length > 0 ? lpHistory[lpHistory.length - 1] : null;
-
-    const summonerName = `${gameName}#${tagLine}`;
-    const upperRegion = region.toUpperCase();
-
-    if (latestLPRecord) {
-      const [tier, division = ''] = latestLPRecord.rank
-        ? latestLPRecord.rank.split(' ')
-        : ['Unranked', ''];
+// ---------------- helpers ---------------------------------------------------
+function buildSortedRankings(accs) {
+  return accs
+    .map(a => {
+      const last = a.lpHistory?.at(-1);
+      const [tier = 'UNRANKED', div = ''] = last?.rank?.split(' ') ?? [];
       return {
-        summonerName,
-        region: upperRegion,
-        tier: tier || 'Unranked',
-        rank: division,
-        leaguePoints: latestLPRecord.lp,
+        name: `${a.gameName}#${a.tagLine}`,
+        region: a.region.toUpperCase(),
+        tier,
+        div,
+        lp: last?.lp ?? 0,
       };
-    }
-
-    return {
-      summonerName,
-      region: upperRegion,
-      tier: 'Unranked',
-      rank: '',
-      leaguePoints: 0,
-    };
-  });
-
-  rankings.sort((a, b) => {
-    const rankScoreA = getRankScore(a.tier, a.rank, a.leaguePoints);
-    const rankScoreB = getRankScore(b.tier, b.rank, b.leaguePoints);
-    return rankScoreB - rankScoreA;
-  });
-
-  return rankings;
+    })
+    .sort((x, y) => rankScore(y) - rankScore(x));
 }
 
-function buildLeaderboardEmbed(rankings, page, totalPages) {
-  const startIndex = (page - 1) * ENTRIES_PER_PAGE;
-  const endIndex = startIndex + ENTRIES_PER_PAGE;
-  const pageRankings = rankings.slice(startIndex, endIndex);
+function rankScore({ tier, div, lp }) {
+  const tiers = [
+    'IRON','BRONZE','SILVER','GOLD','PLATINUM','EMERALD','DIAMOND','MASTER','GRANDMASTER','CHALLENGER',
+  ];
+  const divVal = { IV: 1, III: 2, II: 3, I: 4, '': 5 };
+  const idx = tiers.indexOf(tier.toUpperCase());
+  return (idx + 1) * 1_000_000 + (divVal[div] || 0) * 10_000 + lp;
+}
 
-  const description = pageRankings
-    .map((acc, index) => {
-      const position = startIndex + index + 1;
-      const tierEmoji = tierEmojis[acc.tier.toUpperCase()] || tierEmojis.UNRANKED;
-      const displayRank =
-        acc.tier !== 'Unranked'
-          ? `${capitalizeFirstLetter(acc.tier.toLowerCase())} ${acc.rank} (${acc.leaguePoints} LP)`
-          : 'Unranked';
-
-      return `**${position}. ${acc.summonerName} (${acc.region})** - ${tierEmoji} ${displayRank}`;
+function makeEmbed(rank, page, pages) {
+  const start = (page - 1) * ENTRIES;
+  const slice = rank.slice(start, start + ENTRIES);
+  const desc = slice
+    .map((r, i) => {
+      const pos = start + i + 1;
+      const emoji = TIER_EMOJIS[r.tier.toUpperCase()] ?? TIER_EMOJIS.UNRANKED;
+      const rankTxt =
+        r.tier === 'UNRANKED'
+          ? 'Unranked'
+          : `${capitalizeFirst(r.tier.toLowerCase())} ${r.div} (${r.lp} LP)`;
+      return `**${pos}. ${r.name} (${r.region})** — ${emoji} ${rankTxt}`;
     })
-    .join('\n');
-
+    .join('\\n');
   return new EmbedBuilder()
-    .setTitle(`🏆 Leaderboard (Page ${page}/${totalPages})`)
-    .setColor('#FFD700')
-    .setDescription(description || 'No players found on this page.')
-    .setFooter({ text: `Total tracked accounts: ${rankings.length}` })
+    .setColor(0xffd700)
+    .setTitle(`🏆 Leaderboard – Page ${page}/${pages}`)
+    .setDescription(desc || 'No data')
+    .setFooter({ text: `Total tracked accounts: ${rank.length}` })
     .setTimestamp();
 }
 
-function buildActionRow(page, totalPages, disabled = false) {
+function makeRow(p, pages, disabled = false) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId('prev_page')
+      .setCustomId('prev')
       .setLabel('Previous')
       .setStyle(ButtonStyle.Primary)
-      .setDisabled(disabled || page === 1),
+      .setDisabled(disabled || p === 1),
     new ButtonBuilder()
-      .setCustomId('next_page')
+      .setCustomId('next')
       .setLabel('Next')
       .setStyle(ButtonStyle.Primary)
-      .setDisabled(disabled || page === totalPages)
+      .setDisabled(disabled || p === pages),
   );
-}
-
-function capitalizeFirstLetter(string) {
-  return string.charAt(0).toUpperCase() + string.slice(1);
-}
-
-function getRankScore(tier, division, leaguePoints) {
-  // Insert Emerald between Platinum and Diamond
-  const tiers = [
-    'IRON',
-    'BRONZE',
-    'SILVER',
-    'GOLD',
-    'PLATINUM',
-    'EMERALD',
-    'DIAMOND',
-    'MASTER',
-    'GRANDMASTER',
-    'CHALLENGER',
-  ];
-
-  const divisions = { I: 4, II: 3, III: 2, IV: 1 };
-
-  let tierValue = tiers.indexOf(tier.toUpperCase());
-  if (tierValue === -1) tierValue = -1;
-
-  let divisionValue = 0;
-  // IRON to EMERALD have divisions
-  // DIAMOND also have divisions (up to the code)
-  // MASTER, GRANDMASTER, CHALLENGER have no divisions (fixed value)
-  if (tierValue >= 0 && tierValue <= 6) {
-    divisionValue = divisions[division] || 0;
-  } else if (tierValue >= 7) {
-    // MASTER(7), GRANDMASTER(8), CHALLENGER(9) have a fixed division value
-    divisionValue = 5;
-  }
-
-  const lpValue = leaguePoints / 1000;
-  return tierValue * 100 + divisionValue * 10 + lpValue;
 }

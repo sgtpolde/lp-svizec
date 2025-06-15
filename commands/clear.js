@@ -1,168 +1,143 @@
 // commands/clear.js
-const { PermissionsBitField } = require('discord.js');
+
+const { PermissionsBitField, EmbedBuilder, Collection } = require('discord.js');
+const logger = require('../utils/logger').child({ label: 'commands/clear' });
+
+const TWO_WEEKS = 14 * 24 * 60 * 60 * 1000;
+const MAX_DELETE = 10_000; // Discord hard cap we enforce
 
 module.exports = {
   data: {
     name: 'clear',
-    description: 'Clear a specified number of messages or all messages in the channel.',
+    description: 'Delete a number of recent messages or purge the entire channel.',
   },
+
   /**
-   * Execute the clear command.
    * @param {import('discord.js').Message} message
    * @param {string[]} args
    */
   async execute(message, args) {
-    // Check if the user can manage messages
-    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-      return message.reply('❌ You do not have permission to use this command.');
+    if (!message.inGuild()) return;
+
+    // — Permission checks —
+    const missing = missingPerms(message);
+    if (missing) {
+      await message.reply(missing);
+      return;
     }
 
-    // Check if the bot can manage messages
-    if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-      return message.reply('❌ I need the **Manage Messages** permission to delete messages.');
-    }
+    const amount = parseInt(args[0], 10);
+    const purgeAll = !amount || amount <= 0;
 
-    // Parse the number of messages to delete, if any
-    const numberToDelete = parseInt(args[0], 10);
-    const deletingAll = isNaN(numberToDelete) || numberToDelete <= 0;
-
-    if (deletingAll) {
-      // User wants to clear ALL messages
-      const confirmationMessage = await message.reply(
-        '⚠️ Are you sure you want to delete **ALL** messages in this channel? Type `yes` to confirm.'
+    if (purgeAll) {
+      const proceed = await confirm(
+        message,
+        '⚠️  Delete **ALL** messages in this channel? Type `yes` within 15 s to confirm.'
       );
-
-      const filter = (m) => m.author.id === message.author.id && m.content.toLowerCase() === 'yes';
-      try {
-        await message.channel.awaitMessages({ filter, max: 1, time: 15000, errors: ['time'] });
-
-        // User confirmed
-        await confirmationMessage.delete().catch(console.error);
-        // Delete the user's "yes" reply and the command message
-        await message.channel.bulkDelete(2).catch(console.error);
-
-        const messagesDeleted = await deleteAllMessages(message.channel);
-        sendDeletionConfirmation(message.channel, messagesDeleted);
-      } catch (error) {
-        console.error(error);
-        message.reply('❌ Command cancelled or an error occurred.');
-      }
+      if (!proceed) return;
+      const deleted = await purgeChannel(message.channel);
+      await sendEmbed(message.channel, `Deleted **${deleted}** messages – full purge complete.`);
     } else {
-      // A number of messages to delete was provided
-      if (numberToDelete > 10000) {
-        return message.reply('❌ You cannot delete more than 10,000 messages at once.');
+      if (amount > MAX_DELETE) {
+        await message.reply(`❌  You can delete at most ${MAX_DELETE} messages at once.`);
+        return;
       }
-
-      try {
-        const messagesDeleted = await deleteNumberOfMessages(message.channel, numberToDelete);
-        sendDeletionConfirmation(message.channel, messagesDeleted);
-      } catch (error) {
-        console.error(error);
-        message.reply('❌ An error occurred while deleting messages.');
-      }
+      const deleted = await purgeChannel(message.channel, amount + 1); // +1 to include command msg
+      await sendEmbed(message.channel, `Deleted **${deleted}** messages.`);
     }
   },
 };
 
-/**
- * Delete all messages from a channel.
- * Uses bulk delete for recent messages, and individual deletion for older messages.
- * @param {import('discord.js').TextChannel} channel
- * @returns {Promise<number>} Total messages deleted
- */
-async function deleteAllMessages(channel) {
-  let messagesDeleted = 0;
-  let lastMessageId = null;
-
-  while (true) {
-    const fetched = await channel.messages.fetch({ limit: 100, before: lastMessageId });
-    if (fetched.size === 0) break;
-
-    const recentMessages = fetched.filter(msg => msg.createdTimestamp > Date.now() - 1209600000);
-    const oldMessages = fetched.filter(msg => msg.createdTimestamp <= Date.now() - 1209600000);
-
-    // Bulk delete recent messages
-    if (recentMessages.size > 0) {
-      // recentMessages is a Collection, bulkDelete can accept that directly
-      await channel.bulkDelete(recentMessages, true).catch(console.error);
-      messagesDeleted += recentMessages.size;
-    }
-
-    // Delete old messages individually
-    for (const msg of oldMessages.values()) {
-      await msg.delete().catch(console.error);
-      messagesDeleted++;
-      await sleep(200); // prevent hitting rate limits
-    }
-
-    lastMessageId = fetched.last().id;
+// --------------------------------------------------------
+// helpers
+// --------------------------------------------------------
+function missingPerms(message) {
+  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+    return '❌  You need **Manage Messages** permission to use this command.';
   }
-
-  return messagesDeleted;
-}
-
-/**
- * Delete a specified number of messages from a channel.
- * Uses bulk delete for recent messages, and individual deletion for older messages.
- * @param {import('discord.js').TextChannel} channel
- * @param {number} numberToDelete
- * @returns {Promise<number>} Total messages deleted
- */
-async function deleteNumberOfMessages(channel, numberToDelete) {
-  let messagesDeleted = 0;
-  let lastMessageId = null;
-  let remaining = numberToDelete + 1;
-
-  while (remaining > 0) {
-    const fetchLimit = remaining > 100 ? 100 : remaining;
-    const fetched = await channel.messages.fetch({ limit: fetchLimit, before: lastMessageId });
-    if (fetched.size === 0) break;
-
-    const recentMessages = fetched.filter(msg => msg.createdTimestamp > Date.now() - 1209600000);
-    const oldMessages = fetched.filter(msg => msg.createdTimestamp <= Date.now() - 1209600000);
-
-    // Bulk delete recent messages if possible
-    if (recentMessages.size > 0) {
-      const deletableCount = Math.min(recentMessages.size, remaining);
-      const recentArray = Array.from(recentMessages.values()).slice(0, deletableCount);
-
-      await channel.bulkDelete(recentArray, true).catch(console.error);
-      messagesDeleted += recentArray.length;
-      remaining -= recentArray.length;
-    }
-
-    // If still need to delete more and we have old messages
-    for (const msg of oldMessages.values()) {
-      if (remaining <= 0) break;
-      await msg.delete().catch(console.error);
-      messagesDeleted++;
-      remaining--;
-      await sleep(200);
-    }
-
-    if (fetched.size === 0) break;
-    lastMessageId = fetched.last().id;
+  if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+    return '❌  I need **Manage Messages** permission to delete messages.';
   }
-
-  return messagesDeleted;
+  return null;
 }
 
 /**
- * Send a confirmation message indicating how many messages were deleted.
- * Deletes itself after 5 seconds.
- * @param {import('discord.js').TextChannel} channel
- * @param {number} count
+ * Confirm dangerous action – returns boolean
  */
-function sendDeletionConfirmation(channel, count) {
-  channel.send(`✅ Successfully deleted ${count} messages.`)
-    .then(msg => setTimeout(() => msg.delete().catch(console.error), 5000));
+async function confirm(message, prompt) {
+  const promptMsg = await message.reply(prompt);
+  try {
+    const collected = await message.channel.awaitMessages({
+      filter: m => m.author.id === message.author.id && m.content.toLowerCase() === 'yes',
+      max: 1,
+      time: 15_000,
+      errors: ['time'],
+    });
+    await promptMsg.delete().catch(() => {});
+    await collected
+      .first()
+      .delete()
+      .catch(() => {});
+    return true;
+  } catch {
+    await promptMsg.edit('❌  Cancelled.');
+    return false;
+  }
 }
 
 /**
- * Simple sleep utility to avoid hitting rate limits
- * @param {number} ms
- * @returns {Promise<void>}
+ * Purge channel: if limit is undefined → delete everything.
+ * Returns number deleted.
  */
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+async function purgeChannel(channel, limit) {
+  let removed = 0;
+  let before;
+  while (limit === undefined || limit > 0) {
+    const fetchSize = limit ? Math.min(limit, 100) : 100;
+    const msgs = await channel.messages.fetch({ limit: fetchSize, before });
+    if (!msgs.size) break;
+
+    const [recent, older] = partitionByAge(msgs);
+    if (recent.size) {
+      const slice = limit ? recent.first(limit) : recent;
+      const deleted = await channel
+        .bulkDelete(slice, true)
+        .then(c => c.size ?? c.length)
+        .catch(err => {
+          logger.warn(err);
+          return 0;
+        });
+      removed += deleted;
+      if (limit) limit -= deleted;
+    }
+
+    for (const msg of older.values()) {
+      if (limit !== undefined && limit <= 0) break;
+      await msg.delete().catch(() => {});
+      removed++;
+      if (limit) limit--;
+      await sleep(250);
+    }
+
+    before = msgs.last().id;
+  }
+  return removed;
 }
+
+function partitionByAge(collection) {
+  const recent = new Collection();
+  const older = new Collection();
+  const cutoff = Date.now() - TWO_WEEKS;
+  for (const [id, msg] of collection) {
+    (msg.createdTimestamp > cutoff ? recent : older).set(id, msg);
+  }
+  return [recent, older];
+}
+
+async function sendEmbed(channel, text) {
+  const embed = new EmbedBuilder().setColor(0x57f287).setDescription(`✅  ${text}`).setTimestamp();
+  const msg = await channel.send({ embeds: [embed] });
+  setTimeout(() => msg.delete().catch(() => {}), 5_000);
+}
+
+const sleep = ms => new Promise(res => setTimeout(res, ms));

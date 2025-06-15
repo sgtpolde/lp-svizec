@@ -1,4 +1,5 @@
 // commands/stats.js
+
 const Account = require('../models/Account');
 const GuildSettings = require('../models/GuildSettings');
 const { EmbedBuilder } = require('discord.js');
@@ -8,311 +9,191 @@ const {
   getRankedStats,
   isApiKeyValid,
 } = require('../utils/riotApi');
-const logger = require('../utils/logger');
+const { getDDragonVersion } = require('../utils/ddragon');
+const { createProgressBar, capitalizeFirst } = require('../utils/helpers');
+const logger = require('../utils/logger').child({ label: 'commands/stats' });
+
+const QUEUE_SOLO = 420;
+const MAX_HISTORY = 200;
 
 module.exports = {
   data: {
     name: 'stats',
-    description: 'Fetch and display stats for tracked accounts',
+    description: 'Fetch and broadcast latest ranked stats for all tracked accounts',
   },
+
   /**
-   * Execute the stats command.
-   * @param {import('discord.js').Message|null} message
-   * @param {string[]|null} args
+   * @param {import('discord.js').Message | null} message
+   * @param {string[] | null} _args
    * @param {import('discord.js').Client} client
    */
-  async execute(message, args, client) {
-    try {
-      const validApiKey = await isApiKeyValid();
-      if (!validApiKey) {
-        logger.error('Riot API key invalid or expired. Cannot fetch stats.');
-        if (message) {
-          await message.reply(
-            '❌ Cannot fetch stats because the Riot API key is invalid or expired. Please update the API key.'
-          );
-        }
-        return;
-      }
-
-      const accounts = await Account.find();
-      const guildSettings = await GuildSettings.find();
-      const guildSettingsMap = new Map();
-      guildSettings.forEach((setting) => {
-        guildSettingsMap.set(setting.guildId, setting.channelId);
-      });
-
-      for (const account of accounts) {
-        const { region, puuid, summonerId, gameName, tagLine } = account;
-
-        const lastRecord =
-          account.lpHistory && account.lpHistory.length > 0
-            ? account.lpHistory[account.lpHistory.length - 1]
-            : null;
-
-        let lastLP = lastRecord ? lastRecord.lp : null;
-        let lastRank = lastRecord ? lastRecord.rank : 'Unranked';
-
-        const matchHistory = await getMatchHistory(puuid, region, 'ranked');
-        const newMatches = [];
-
-        for (const matchId of matchHistory) {
-          if (matchId === account.lastMatchId) break;
-          newMatches.push(matchId);
-        }
-
-        if (newMatches.length > 0) {
-          account.lastMatchId = newMatches[0];
-
-          for (const matchId of newMatches.reverse()) {
-            const matchDetails = await getMatchDetails(matchId, region);
-
-            if (matchDetails.info.queueId !== 420) continue;
-
-            const participant = matchDetails.info.participants.find(
-              (p) => p.puuid === puuid
-            );
-            if (!participant) continue;
-
-            const kda = `${participant.kills}/${participant.deaths}/${participant.assists}`;
-            const result = participant.win ? 'Victory' : 'Defeat';
-            const championName = participant.championName;
-
-            const rankedStats = await getRankedStats(summonerId, region);
-            const soloQueueStats = rankedStats.find(
-              (queue) => queue.queueType === 'RANKED_SOLO_5x5'
-            );
-
-            let currentLP = 0;
-            let currentRank = 'Unranked';
-            let totalWins = 0;
-            let totalLosses = 0;
-            let winPercentage = 0;
-
-            if (soloQueueStats) {
-              totalWins = soloQueueStats.wins;
-              totalLosses = soloQueueStats.losses;
-              const totalGames = totalWins + totalLosses;
-              winPercentage =
-                totalGames > 0
-                  ? ((totalWins / totalGames) * 100).toFixed(2)
-                  : 0;
-
-              currentLP = soloQueueStats.leaguePoints;
-              const currentTier = soloQueueStats.tier;
-              const currentDivision = soloQueueStats.rank;
-              currentRank = `${capitalizeFirstLetter(
-                currentTier.toLowerCase()
-              )} ${currentDivision}`;
-            }
-
-            let lpChange = null;
-            if (lastLP !== null) {
-              const lastRankParsed = parseRank(lastRank);
-              const currentRankParsed = parseRank(currentRank);
-
-              const lastRankValue = getRankValue(
-                lastRankParsed.tier,
-                lastRankParsed.division
-              );
-              const currentRankValue = getRankValue(
-                currentRankParsed.tier,
-                currentRankParsed.division
-              );
-
-              if (currentRankValue > lastRankValue) {
-                lpChange = 100 - lastLP + currentLP;
-              } else if (currentRankValue < lastRankValue) {
-                lpChange = -lastLP - (100 - currentLP);
-              } else {
-                lpChange = currentLP - lastLP;
-              }
-            }
-
-            let lpChangeText = 'N/A';
-            let lpChangeEmoji = '';
-            if (lpChange !== null) {
-              lpChangeEmoji =
-                lpChange > 0
-                  ? '🔼'
-                  : lpChange < 0
-                  ? '🔽'
-                  : '⏺️';
-              lpChangeText = `${lpChangeEmoji} ${
-                lpChange > 0 ? '+' : ''
-              }${lpChange} LP`;
-            }
-
-            const cs =
-              participant.totalMinionsKilled + participant.neutralMinionsKilled;
-            const csPerMinute = (
-              cs /
-              (matchDetails.info.gameDuration / 60)
-            ).toFixed(1);
-            const visionScore = participant.visionScore;
-            const killParticipation = (
-              ((participant.kills + participant.assists) /
-                matchDetails.info.teams.find(
-                  (t) => t.teamId === participant.teamId
-                ).objectives.champion.kills) *
-              100
-            ).toFixed(1);
-
-            const csProgressBar = createProgressBar(csPerMinute, 10, 10);
-
-            const embed = new EmbedBuilder()
-              .setColor(participant.win ? '#00FF00' : '#FF0000')
-              .setTitle(`${gameName}#${tagLine} - ${result}`)
-              .setDescription(
-                `**Rank:** ${currentRank} (${currentLP} LP)\n**LP Change:** ${lpChangeText}\n**Winrate:** (${totalWins} - ${totalLosses}) | ${winPercentage}%`
-              )
-              .addFields(
-                {
-                  name: 'Champion',
-                  value: championName,
-                  inline: true,
-                },
-                {
-                  name: 'KDA',
-                  value: `⚔️ ${kda}`,
-                  inline: true,
-                },
-                {
-                  name: 'Kill Participation',
-                  value: `${killParticipation}%`,
-                  inline: true,
-                },
-                {
-                  name: 'CS per Minute',
-                  value: `📈 ${csPerMinute} cs/min\n${csProgressBar}`,
-                  inline: true,
-                },
-                {
-                  name: 'Vision Score',
-                  value: `👁️ ${visionScore}`,
-                  inline: true,
-                }
-              )
-              .setThumbnail(
-                `https://ddragon.leagueoflegends.com/cdn/13.21.1/img/champion/${championName}.png`
-              )
-              .setFooter({
-                text: `Game Duration: ${formatGameDuration(
-                  matchDetails.info.gameDuration
-                )}`,
-              })
-              .setTimestamp();
-
-            for (const [guildId, channelId] of guildSettingsMap.entries()) {
-              try {
-                const guild = await client.guilds.fetch(guildId);
-                const channel = await guild.channels.fetch(channelId);
-                if (channel) {
-                  await channel.send({ embeds: [embed] }).catch((err) => {
-                    logger.error(
-                      `Failed to send message to channel ${channelId}: ${err.message}`
-                    );
-                  });
-                } else {
-                  logger.warn(`Channel not found: ${channelId}`);
-                }
-              } catch (error) {
-                logger.error(
-                  `Error sending message to guild ${guildId}: ${error.message}`
-                );
-              }
-            }
-
-            account.lpHistory = account.lpHistory || [];
-            account.lpHistory.push({
-              lp: currentLP,
-              timestamp: new Date(),
-              matchId: matchId,
-              lpChange: lpChange,
-              rank: currentRank,
-            });
-
-            const maxHistoryLength = 200;
-            if (account.lpHistory.length > maxHistoryLength) {
-              account.lpHistory.shift();
-            }
-
-            lastLP = currentLP;
-            lastRank = currentRank;
-          }
-
-          await account.save();
-        }
-      }
-
-      if (message) {
-        await message.reply('✅ Stats updated successfully.');
-      }
-    } catch (error) {
-      logger.error(`Error in stats command: ${error.stack || error}`);
-      if (message) {
-        await message.reply('❌ An error occurred while fetching stats.');
-      }
+  async execute(message, _args, client) {
+    // 1. API key sanity check
+    if (!(await isApiKeyValid())) {
+      const msg = 'Riot API key invalid / expired – stats aborted.';
+      logger.error(msg);
+      if (message) await message.reply(`❌  ${msg}`);
+      return;
     }
 
-    function capitalizeFirstLetter(string) {
-      return string.charAt(0).toUpperCase() + string.slice(1);
+    // 2. Pre‑fetch guild → channel map once
+    const settings = await GuildSettings.find();
+    const guildChannel = new Map(settings.map(s => [s.guildId, s.channelId]));
+
+    // 3. Iterate accounts serially (parallel risks rate‑limit)
+    const accounts = await Account.find();
+    for (const acc of accounts) {
+      await processAccount(acc, guildChannel, client);
     }
 
-    function formatGameDuration(seconds) {
-      const minutes = Math.floor(seconds / 60);
-      const secs = seconds % 60;
-      return `${minutes}m ${secs}s`;
-    }
-
-    function createProgressBar(value, maxValue, size) {
-      const percentage = Math.min(value / maxValue, 1);
-      const filledBars = Math.round(size * percentage);
-      const emptyBars = size - filledBars;
-      const progressBar = '█'.repeat(filledBars) + '░'.repeat(emptyBars);
-      return `\`${progressBar}\` ${Math.round(percentage * 100)}%`;
-    }
-
-    function parseRank(rankStr) {
-      if (!rankStr || rankStr === 'Unranked') {
-        return { tier: 'Unranked', division: '' };
-      }
-      const [tier, division] = rankStr.split(' ');
-      return { tier: capitalizeFirstLetter(tier.toLowerCase()), division };
-    }
-
-    function getRankValue(tier, division) {
-      const tierValues = {
-        Iron: 0,
-        Bronze: 1,
-        Silver: 2,
-        Gold: 3,
-        Platinum: 4,
-        Emerald: 5,
-        Diamond: 6,
-        Master: 7,
-        Grandmaster: 8,
-        Challenger: 9,
-        Unranked: -1,
-      };
-
-      const divisionValues = {
-        IV: 0,
-        III: 1,
-        II: 2,
-        I: 3,
-        '': 4,
-      };
-
-      const tierValue =
-        tierValues[tier] !== undefined ? tierValues[tier] : -1;
-      const divisionValue =
-        divisionValues[division] !== undefined ? divisionValues[division] : 0;
-
-      if (tierValue === -1) {
-        return -1;
-      }
-
-      return tierValue * 4 + divisionValue;
-    }
+    if (message) await message.reply('✅  Stats update complete.');
   },
 };
+
+// -----------------------------------------------------------------------------
+// Account worker
+// -----------------------------------------------------------------------------
+async function processAccount(acc, guildChannel, client) {
+  const { region, puuid, summonerId, gameName, tagLine } = acc;
+  const lastRecord = acc.lpHistory?.at(-1) ?? null;
+  let lastLP = lastRecord?.lp ?? null;
+  let lastRank = lastRecord?.rank ?? 'Unranked';
+
+  // Fetch latest 20 ranked match IDs
+  const matches = await getMatchHistory(puuid, region, 'ranked');
+  const newIds = [];
+  for (const id of matches) {
+    if (id === acc.lastMatchId) break;
+    newIds.push(id);
+  }
+  if (!newIds.length) return; // nothing new
+
+  acc.lastMatchId = newIds[0]; // newest ID becomes checkpoint
+
+  // Process each new match oldest → newest
+  for (const matchId of newIds.reverse()) {
+    const details = await getMatchDetails(matchId, region);
+    if (details.info.queueId !== QUEUE_SOLO) continue; // only soloQ
+
+    const part = details.info.participants.find(p => p.puuid === puuid);
+    if (!part) continue;
+
+    // Current ranked stats
+    const ranked = await getRankedStats(summonerId, region);
+    const solo = ranked.find(q => q.queueType === 'RANKED_SOLO_5x5');
+
+    const { currentLP, currentRank, totalWins, totalLosses, winPercentage } = parseSoloStats(solo);
+
+    const lpChange = calcLPChange(lastLP, lastRank, currentLP, currentRank);
+    const lpText = lpChangeToText(lpChange);
+
+    const cs = part.totalMinionsKilled + part.neutralMinionsKilled;
+    const csPerMin = (cs / (details.info.gameDuration / 60)).toFixed(1);
+    const kp = (
+      ((part.kills + part.assists) /
+        details.info.teams.find(t => t.teamId === part.teamId).objectives.champion.kills) *
+      100
+    ).toFixed(1);
+
+    //const bar = createProgressBar(csPerMin, 10, 10);
+
+    const embed = new EmbedBuilder()
+      .setColor(part.win ? 0x57f287 : 0xed4245)
+      .setTitle(`${gameName}#${tagLine} – ${part.win ? 'Victory' : 'Defeat'}`)
+      .setDescription(
+        `**Rank:** ${currentRank} (${currentLP} LP)\n**LP Change:** ${lpText}\n` +
+          `**Win rate:** (${totalWins}-${totalLosses}) | ${winPercentage}%`
+      )
+      .addFields(
+        { name: 'Champion', value: part.championName, inline: true },
+        { name: 'KDA', value: `⚔️  ${part.kills}/${part.deaths}/${part.assists}`, inline: true },
+        { name: 'Kill Participation', value: `${kp}%`, inline: true },
+        { name: 'CS/ Min', value: `📈  ${csPerMin}`, inline: true },
+        { name: 'Vision Score', value: `👁️  ${part.visionScore}`, inline: true }
+      )
+      .setThumbnail(
+        `https://ddragon.leagueoflegends.com/cdn/${getDDragonVersion()}/img/champion/${part.championName}.png`
+      )
+      .setFooter({ text: `Game Duration: ${formatDuration(details.info.gameDuration)}` })
+      .setTimestamp();
+
+    // Broadcast to every guild channel configured
+    for (const [gid, cid] of guildChannel) {
+      try {
+        const guild = await client.guilds.fetch(gid);
+        const channel = await guild.channels.fetch(cid);
+        if (channel) await channel.send({ embeds: [embed] });
+      } catch (err) {
+        logger.warn(`Broadcast to ${gid}/${cid} failed: ${err.message}`);
+      }
+    }
+
+    // Record LP history
+    acc.addLPRecord({ lp: currentLP, matchId, lpChange, rank: currentRank }, MAX_HISTORY);
+    lastLP = currentLP;
+    lastRank = currentRank;
+  }
+
+  await acc.save();
+}
+
+// -----------------------------------------------------------------------------
+// helpers specific to this command
+// -----------------------------------------------------------------------------
+function parseSoloStats(solo) {
+  if (!solo)
+    return {
+      currentLP: 0,
+      currentRank: 'Unranked',
+      totalWins: 0,
+      totalLosses: 0,
+      winPercentage: 0,
+    };
+  const totalGames = solo.wins + solo.losses;
+  return {
+    currentLP: solo.leaguePoints,
+    currentRank: `${capitalizeFirst(solo.tier.toLowerCase())} ${solo.rank}`,
+    totalWins: solo.wins,
+    totalLosses: solo.losses,
+    winPercentage: totalGames ? ((solo.wins / totalGames) * 100).toFixed(2) : 0,
+  };
+}
+
+function calcLPChange(lastLP, lastRank, currentLP, currentRank) {
+  if (lastLP === null) return null;
+  const lastVal = rankToValue(lastRank);
+  const curVal = rankToValue(currentRank);
+  if (curVal > lastVal) return 100 - lastLP + currentLP;
+  if (curVal < lastVal) return -lastLP - (100 - currentLP);
+  return currentLP - lastLP;
+}
+
+function lpChangeToText(lp) {
+  if (lp === null) return 'N/A';
+  const emoji = lp > 0 ? '🔼' : lp < 0 ? '🔽' : '⏺️';
+  return `${emoji} ${lp > 0 ? '+' : ''}${lp} LP`;
+}
+
+function formatDuration(sec) {
+  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+}
+
+const tierVal = {
+  Iron: 0,
+  Bronze: 1,
+  Silver: 2,
+  Gold: 3,
+  Platinum: 4,
+  Emerald: 5,
+  Diamond: 6,
+  Master: 7,
+  Grandmaster: 8,
+  Challenger: 9,
+  Unranked: -1,
+};
+const divVal = { IV: 0, III: 1, II: 2, I: 3, '': 4 };
+function rankToValue(rankStr) {
+  if (rankStr === 'Unranked') return -1;
+  const [tier, div] = rankStr.split(' ');
+  return tierVal[capitalizeFirst(tier)] * 4 + divVal[div];
+}

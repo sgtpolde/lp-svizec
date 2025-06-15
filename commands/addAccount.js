@@ -1,96 +1,59 @@
 // commands/addAccount.js
 const Account = require('../models/Account');
-const {
-  getPUUIDByRiotID,
-  getSummonerByPUUID,
-  getRankedStats,
-} = require('../utils/riotApi');
+const { getPUUIDByRiotID, getSummonerByPUUID, getRankedStats } = require('../utils/riotApi');
+const { getDDragonVersion } = require('../utils/ddragon');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
-const logger = require('../utils/logger');
+const { VALID_REGIONS, REGION_ALIASES } = require('../utils/constants');
+const { safeDeleteMessage, capitalizeFirst } = require('../utils/helpers');
+const logger = require('../utils/logger').child({ label: 'commands/addAccount' });
 
 module.exports = {
   data: {
     name: 'addaccount',
     description: 'Add a League of Legends account to track',
   },
+
   /**
-   * Execute the addAccount command.
    * @param {import('discord.js').Message} message
    * @param {string[]} args
-   * @param {import('discord.js').Client} client
    */
-  async execute(message, args, client) {
-    let processingMessage;
+  async execute(message, args) {
+    if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+      await message.reply('❌  I need **Manage Messages** permission to tidy up command messages.');
+      return;
+    }
+
+    if (args.length < 3) {
+      await message.reply(
+        '❌  Usage: `!addaccount <GameName> <TagLine> <Region>`\n' +
+          'Example: `!addaccount SummonerName 1234 euw`'
+      );
+      await safeDeleteMessage(message);
+      return;
+    }
+
+    const [gameName, tagLine, rawRegion] = args;
+    const region = REGION_ALIASES[rawRegion.toLowerCase()] || rawRegion.toLowerCase();
+    if (!VALID_REGIONS.includes(region)) {
+      await message.reply(`❌  Invalid region. Valid regions: ${VALID_REGIONS.join(', ')}`);
+      await safeDeleteMessage(message);
+      return;
+    }
+
+    const pending = await message.channel.send('🔄  Fetching account data…');
+
     try {
-      // Check bot permissions
-      if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-        await message.reply('❌ I need the **Manage Messages** permission to delete messages.');
-        return;
-      }
+      const { puuid } = await getPUUIDByRiotID(gameName, tagLine);
+      const summoner = await getSummonerByPUUID(puuid, region);
 
-      // Validate arguments
-      if (args.length < 3) {
-        await message.reply(
-          '❌ Usage: `!addaccount <GameName> <TagLine> <Region>`\nExample: `!addaccount SummonerName 1234 euw`'
-        );
+      if (await Account.findOne({ discordId: message.author.id, puuid, region })) {
+        await pending.edit('⚠️  You already track that account.');
         await safeDeleteMessage(message);
         return;
       }
 
-      const [gameName, tagLine, regionInput] = args;
-      const region = regionInput.toLowerCase();
-
-      const validRegions = [
-        'na', 'euw', 'eun', 'kr', 'jp', 'oce', 'br', 'lan', 'las', 'ru', 'tr',
-      ];
-
-      if (!validRegions.includes(region)) {
-        await message.reply(`❌ Invalid server. Valid servers: ${validRegions.join(', ')}`);
-        await safeDeleteMessage(message);
-        return;
-      }
-
-      // Indicate processing
-      processingMessage = await message.channel.send('🔄 Processing your account. Please wait...');
-
-      // Fetch account data
-      const accountData = await getPUUIDByRiotID(gameName, tagLine);
-      const puuid = accountData.puuid;
-
-      // Summoner data
-      const summonerData = await getSummonerByPUUID(puuid, region);
-
-      // Check if account already tracked
-      const existingAccount = await Account.findOne({
-        discordId: message.author.id,
-        puuid,
-        region,
-      });
-
-      if (existingAccount) {
-        await safeDeleteMessage(processingMessage);
-        await message.reply('⚠️ This account is already being tracked.');
-        await safeDeleteMessage(message);
-        return;
-      }
-
-      // Get LP and rank
-      const rankedStats = await getRankedStats(summonerData.id, region);
-      const soloQueueStats = rankedStats.find((queue) => queue.queueType === 'RANKED_SOLO_5x5');
-
-      let lastLP = null;
-      let rank = 'Unranked';
-      const lpHistory = [];
-
-      if (soloQueueStats) {
-        lastLP = soloQueueStats.leaguePoints;
-        rank = `${capitalizeFirstLetter(soloQueueStats.tier.toLowerCase())} ${soloQueueStats.rank}`;
-        lpHistory.push({
-          lp: lastLP,
-          timestamp: new Date(),
-          rank,
-        });
-      }
+      const ranked = await getRankedStats(summoner.id, region);
+      const solo = ranked.find(q => q.queueType === 'RANKED_SOLO_5x5');
 
       const account = new Account({
         discordId: message.author.id,
@@ -98,82 +61,52 @@ module.exports = {
         tagLine,
         region,
         puuid,
-        summonerId: summonerData.id,
-        lastMatchId: null,
-        lastLP,
-        lpHistory,
+        summonerId: summoner.id,
       });
 
+      let rank = 'Unranked';
+      if (solo) {
+        rank = `${capitalizeFirst(solo.tier.toLowerCase())} ${solo.rank}`;
+        account.addLPRecord({ lp: solo.leaguePoints, rank });
+      }
       await account.save();
 
-      // Clean up
-      await safeDeleteMessage(processingMessage);
-      await safeDeleteMessage(message);
+      /* ---------- thumbnail URL with fall‑back ---------- */
+      const ddragonVer = getDDragonVersion();
+      const iconId = summoner.profileIconId || 0;
+      const thumbUrl = `https://ddragon.leagueoflegends.com/cdn/${ddragonVer}/img/profileicon/${iconId}.png`;
+      // basic sanity check
+      const validUrl = /^https:\/\/.+\.png$/.test(thumbUrl) ? thumbUrl : undefined;
 
-      // Confirmation embed
-      const confirmationEmbed = new EmbedBuilder()
-        .setColor('#00FF00')
-        .setTitle('✅ Account Added Successfully!')
+      const embed = new EmbedBuilder()
+        .setColor(0x57f287)
+        .setTitle('✅  Account added')
         .addFields(
           { name: 'Riot ID', value: `${gameName}#${tagLine}`, inline: true },
           { name: 'Region', value: region.toUpperCase(), inline: true },
-          {
-            name: 'Current Rank',
-            value: `${rank}${lastLP !== null ? ` (${lastLP} LP)` : ''}`,
-            inline: true,
-          }
+          { name: 'Rank', value: rank, inline: true }
         )
-        .setThumbnail(
-          `https://ddragon.leagueoflegends.com/cdn/13.21.1/img/profileicon/${summonerData.profileIconId}.png`
-        )
-        .setFooter({ text: `Summoner Level: ${summonerData.summonerLevel}` })
+        .setFooter({ text: `Summoner Level: ${summoner.summonerLevel}` })
         .setTimestamp();
 
-      await message.channel.send({ embeds: [confirmationEmbed] });
-    } catch (error) {
-      logger.error(`Error in addAccount command: ${error.stack || error}`);
-      await safeDeleteMessage(processingMessage);
+      if (validUrl) embed.setThumbnail(validUrl);
+
+      await pending.edit({ content: '', embeds: [embed] });
       await safeDeleteMessage(message);
-
-      let errorMessage = '❌ An error occurred while adding the account.';
-      if (error.response) {
-        if (error.response.status === 404) {
-          errorMessage = '❌ Account not found. Check the name, tag, and server.';
-        } else if (error.response.status === 403) {
-          errorMessage = '❌ Invalid or expired Riot API key.';
-        }
-      }
-
-      if (message && message.channel) {
-        try {
-          await message.reply(errorMessage);
-        } catch (replyError) {
-          logger.error(`Failed to reply: ${replyError.message}`);
-        }
-      }
+    } catch (err) {
+      logger.error(`AddAccount failed → ${err.stack || err}`);
+      await safeDeleteMessage(pending);
+      await safeDeleteMessage(message);
+      await message.reply(mapRiotError(err));
     }
   },
 };
 
-/**
- * Safely delete a message if possible.
- * @param {import('discord.js').Message} msg
- */
-async function safeDeleteMessage(msg) {
-  if (msg && msg.deletable) {
-    try {
-      await msg.delete();
-    } catch (error) {
-      logger.warn(`Failed to delete message: ${error.message}`);
-    }
-  }
-}
-
-/**
- * Capitalize the first letter of a string.
- * @param {string} string
- * @returns {string}
- */
-function capitalizeFirstLetter(string) {
-  return string.charAt(0).toUpperCase() + string.slice(1);
+function mapRiotError(err) {
+  if (!err?.response?.status) return '❌  Unexpected error – please try again later.';
+  return err.response.status === 404
+    ? '❌  Summoner not found. Check spelling and region.'
+    : err.response.status === 403
+      ? '❌  Riot API key invalid or expired.'
+      : `❌  Riot API error (status ${err.response.status}).`;
 }

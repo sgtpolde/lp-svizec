@@ -33,7 +33,9 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setColor('#0099ff')
         .setTitle(`${account.gameName}#${account.tagLine} - LP Graph`)
-        .setDescription(`Displaying the LP history graph for ${account.gameName}#${account.tagLine}`)
+        .setDescription(
+          `Displaying the LP history graph for ${account.gameName}#${account.tagLine}`
+        )
         .setImage('attachment://lp-graph.png')
         .setTimestamp();
 
