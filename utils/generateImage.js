@@ -1,4 +1,6 @@
 // utils/generateImage.js
+// TODO: Refactor this file to use the new Chart.js API
+
 const { createCanvas, Image } = require('canvas');
 const { Chart, registerables } = require('chart.js');
 const annotationPlugin = require('chartjs-plugin-annotation');
