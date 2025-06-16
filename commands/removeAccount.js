@@ -1,68 +1,55 @@
 // commands/removeAccount.js
+
 const Account = require('../models/Account');
+const { EmbedBuilder } = require('discord.js');
+const { VALID_REGIONS, REGION_ALIASES } = require('../utils/constants');
+const logger = require('../utils/logger').child({ label: 'commands/removeAccount' });
 
 module.exports = {
   data: {
     name: 'removeaccount',
-    description: 'Remove a League of Legends account from tracking',
+    description: 'Stop tracking a League of Legends account',
   },
+
   /**
-   * Execute the remove account command.
-   * @param {Message} message
+   * @param {import('discord.js').Message} message
    * @param {string[]} args
    */
   async execute(message, args) {
     if (args.length < 3) {
-      return message.reply(
-        'Usage: !removeaccount <gameName> <tagLine> <server>'
-      );
+      await message.reply('❌  Usage: `!removeaccount <GameName> <TagLine> <Region>`');
+      return;
     }
 
-    const gameName = args[0];
-    const tagLine = args[1];
-    const region = args[2].toLowerCase();
+    const [gameName, tagLine, rawRegion] = args;
+    const region = REGION_ALIASES[rawRegion.toLowerCase()] || rawRegion.toLowerCase();
 
-    // Validate region
-    const validRegions = [
-      'na',
-      'euw',
-      'eun',
-      'kr',
-      'jp',
-      'oce',
-      'br',
-      'lan',
-      'las',
-      'ru',
-      'tr',
-    ];
-
-    if (!validRegions.includes(region)) {
-      return message.reply(
-        `Invalid server. Valid servers are: ${validRegions.join(', ')}`
-      );
+    if (!VALID_REGIONS.includes(region)) {
+      await message.reply(`❌  Invalid region. Valid regions: ${VALID_REGIONS.join(', ')}`);
+      return;
     }
 
     try {
-      const account = await Account.findOneAndDelete({
+      const removed = await Account.findOneAndDelete({
         discordId: message.author.id,
         gameName,
         tagLine,
         region,
       });
 
-      if (account) {
-        message.reply(
-          `Account ${gameName}#${tagLine} on ${region.toUpperCase()} removed successfully!`
-        );
-      } else {
-        message.reply(
-          `Account ${gameName}#${tagLine} on ${region.toUpperCase()} not found.`
-        );
-      }
-    } catch (error) {
-      console.error(error);
-      message.reply('An error occurred while removing the account.');
+      const embed = new EmbedBuilder()
+        .setColor(removed ? 0x57f287 : 0xed4245)
+        .setTitle(removed ? '✅  Account removed' : '⚠️  Account not found')
+        .setDescription(`${gameName}#${tagLine} (${region.toUpperCase()})`)
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] });
+      logger.info(
+        `${removed ? 'Removed' : 'Not found'} account ${gameName}#${tagLine} (${region}) for ${message.author.tag}`
+      );
+    } catch (err) {
+      logger.error(`removeAccount failed → ${err.stack || err}`);
+      await message.reply('❌  An error occurred while removing the account.');
     }
   },
 };

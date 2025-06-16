@@ -1,4 +1,6 @@
 // utils/generateImage.js
+// TODO: Refactor this file to use the new Chart.js API
+
 const { createCanvas, Image } = require('canvas');
 const { Chart, registerables } = require('chart.js');
 const annotationPlugin = require('chartjs-plugin-annotation');
@@ -11,15 +13,15 @@ const width = 1200;
 const height = 600;
 
 const rankLPMap = {
-  Iron:       { baseLP: 0,    tiers: ['IV', 'III', 'II', 'I'] },
-  Bronze:     { baseLP: 400,  tiers: ['IV', 'III', 'II', 'I'] },
-  Silver:     { baseLP: 800,  tiers: ['IV', 'III', 'II', 'I'] },
-  Gold:       { baseLP: 1200, tiers: ['IV', 'III', 'II', 'I'] },
-  Platinum:   { baseLP: 1600, tiers: ['IV', 'III', 'II', 'I'] },
-  Emerald:    { baseLP: 2000, tiers: ['IV', 'III', 'II', 'I'] },
-  Diamond:    { baseLP: 2400, tiers: ['IV', 'III', 'II', 'I'] },
-  Master:     { baseLP: 2800, tiers: ['Master'] },
-  Grandmaster:{ baseLP: 3200, tiers: ['Grandmaster'] },
+  Iron: { baseLP: 0, tiers: ['IV', 'III', 'II', 'I'] },
+  Bronze: { baseLP: 400, tiers: ['IV', 'III', 'II', 'I'] },
+  Silver: { baseLP: 800, tiers: ['IV', 'III', 'II', 'I'] },
+  Gold: { baseLP: 1200, tiers: ['IV', 'III', 'II', 'I'] },
+  Platinum: { baseLP: 1600, tiers: ['IV', 'III', 'II', 'I'] },
+  Emerald: { baseLP: 2000, tiers: ['IV', 'III', 'II', 'I'] },
+  Diamond: { baseLP: 2400, tiers: ['IV', 'III', 'II', 'I'] },
+  Master: { baseLP: 2800, tiers: ['Master'] },
+  Grandmaster: { baseLP: 3200, tiers: ['Grandmaster'] },
   Challenger: { baseLP: 3600, tiers: ['Challenger'] },
 };
 
@@ -106,7 +108,7 @@ async function generateLPGraph(lpHistory, summonerName) {
 
   const labels = sortedHistory.map((_, i) => `Game ${i + 1}`);
   const totalLPData = sortedHistory.map(entry => calculateTotalLP(entry.rank, entry.lp));
-  
+
   const minTotalLP = Math.min(...totalLPData);
   const maxTotalLP = Math.max(...totalLPData);
   const maxBuffer = Math.min(maxTotalLP + 100, CHALLENGER_MAX + 100);
@@ -118,7 +120,7 @@ async function generateLPGraph(lpHistory, summonerName) {
     const base = data.baseLP;
     // Annotate only if within range
     if (base >= minTotalLP && base <= maxBuffer) {
-      const label = lpToRankLabel(base); 
+      const label = lpToRankLabel(base);
       if (label) {
         relevantAnnotations.push({
           type: 'line',
@@ -132,7 +134,7 @@ async function generateLPGraph(lpHistory, summonerName) {
             color: '#ccc',
             content: label,
             font: { size: 12 },
-          }
+          },
         });
       }
     }
@@ -152,7 +154,7 @@ async function generateLPGraph(lpHistory, summonerName) {
         color: '#ccc',
         content: label,
         font: { size: 12 },
-      }
+      },
     });
   }
 
@@ -190,7 +192,7 @@ async function generateLPGraph(lpHistory, summonerName) {
           },
           grid: {
             color: 'rgba(255,255,255,0.1)',
-          }
+          },
         },
         y: {
           title: {
@@ -217,12 +219,12 @@ async function generateLPGraph(lpHistory, summonerName) {
             color: 'rgba(255, 255, 255, 0.2)',
           },
           // After building ticks, remove any ticks that have empty labels
-          afterBuildTicks: (axis) => {
+          afterBuildTicks: axis => {
             axis.ticks = axis.ticks.filter(t => {
               const label = lpToRankLabel(t.value);
               return label !== null;
             });
-          }
+          },
         },
       },
       plugins: {
@@ -234,17 +236,23 @@ async function generateLPGraph(lpHistory, summonerName) {
           titleColor: '#ffffff',
           bodyColor: '#ffffff',
           callbacks: {
-            label: (context) => {
+            label: context => {
               const dataIndex = context.dataIndex;
               const entry = sortedHistory[dataIndex];
               const lp = context.raw;
-              const lpChange = entry.lpChange !== undefined
-                ? (entry.lpChange > 0 ? `+${entry.lpChange}` : `${entry.lpChange}`)
-                : '';
-              const dateStr = new Date(entry.timestamp).toLocaleString('en-US', { timeZone: 'UTC', hour12: false });
+              const lpChange =
+                entry.lpChange !== undefined
+                  ? entry.lpChange > 0
+                    ? `+${entry.lpChange}`
+                    : `${entry.lpChange}`
+                  : '';
+              const dateStr = new Date(entry.timestamp).toLocaleString('en-US', {
+                timeZone: 'UTC',
+                hour12: false,
+              });
               return [`LP: ${lp}${lpChange ? ` (${lpChange} LP)` : ''}`, `Date: ${dateStr} UTC`];
             },
-            title: () => ''
+            title: () => '',
           },
         },
         legend: {

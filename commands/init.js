@@ -1,41 +1,51 @@
 // commands/init.js
+
+const { PermissionsBitField, EmbedBuilder } = require('discord.js');
 const GuildSettings = require('../models/GuildSettings');
-const { PermissionsBitField } = require('discord.js');
-const logger = require('../utils/logger');
+const logger = require('../utils/logger').child({ label: 'commands/init' });
 
 module.exports = {
   data: {
     name: 'init',
-    description: 'Initialize the bot in the current channel',
+    description: 'Bind the bot to the current channel for automated updates',
   },
+
   /**
-   * Execute the init command.
    * @param {import('discord.js').Message} message
-   * @param {string[]} args
    */
-  async execute(message, args) {
+  async execute(message) {
+    if (!message.inGuild()) {
+      await message.reply('❌  This command can only be used inside a server.');
+      return;
+    }
+
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      return message.reply('❌ You do not have permission to use this command.');
+      await message.reply('❌  You need **Administrator** permission to run this.');
+      return;
     }
 
     const guildId = message.guild.id;
     const channelId = message.channel.id;
 
     try {
-      let settings = await GuildSettings.findOne({ guildId });
+      const settings = await GuildSettings.findOneAndUpdate(
+        { guildId },
+        { $set: { channelId } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
 
-      if (settings) {
-        settings.channelId = channelId;
-        await settings.save();
-        await message.reply('✅ Bot has been re-initialized in this channel.');
-      } else {
-        settings = new GuildSettings({ guildId, channelId });
-        await settings.save();
-        await message.reply('✅ Bot has been initialized in this channel.');
-      }
-    } catch (error) {
-      logger.error(`Error initializing bot in guild ${guildId}: ${error.message}`);
-      await message.reply('❌ An error occurred while initializing the bot.');
+      const title = settings.wasNew ? 'Initialised' : 'Channel updated';
+      const embed = new EmbedBuilder()
+        .setColor(0x57f287) // Discord green
+        .setTitle(`✅  ${title}`)
+        .setDescription(`Automated updates will now post in <#${channelId}>`)
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] });
+      logger.info(`${title} for guild ${guildId} → channel ${channelId}`);
+    } catch (err) {
+      logger.error(`Init failed in guild ${guildId} – ${err.stack || err}`);
+      await message.reply('❌  An error occurred while initialising the bot.');
     }
   },
 };

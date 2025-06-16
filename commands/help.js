@@ -1,5 +1,10 @@
 // commands/help.js
+
 const { EmbedBuilder } = require('discord.js');
+const logger = require('../utils/logger').child({ label: 'commands/help' });
+
+const EMBED_COLOUR = 0x00ff7f;
+const DESC_LIMIT = 4096; // Discord embed description limit
 
 module.exports = {
   data: {
@@ -7,38 +12,51 @@ module.exports = {
     description: 'List all available commands',
   },
   cooldown: 5,
+
   /**
-   * Execute the help command.
    * @param {import('discord.js').Message} message
-   * @param {string[]} args
+   * @param {string[]} _args
    * @param {import('discord.js').Client} client
    */
-  async execute(message, args, client) {
-    const COMMAND_PREFIX = process.env.COMMAND_PREFIX || '!';
+  async execute(message, _args, client) {
+    const PREFIX = process.env.COMMAND_PREFIX || '!';
 
-    // Extract commands and sort them alphabetically by name
-    const commands = Array.from(client.commands.values()).sort((a, b) =>
+    const commands = [...client.commands.values()].sort((a, b) =>
       a.data.name.localeCompare(b.data.name)
     );
 
-    if (commands.length === 0) {
-      return message.reply('I have no commands available at the moment.');
+    if (!commands.length) {
+      await message.reply('I have no commands available at the moment.');
+      return;
     }
 
-    // Map commands into a formatted string
-    const commandList = commands
-      .map((cmd) => `**${COMMAND_PREFIX}${cmd.data.name}** - ${cmd.data.description}`)
-      .join('\n');
+    // Build bullet list lines
+    const lines = commands.map(c => `• \`${PREFIX}${c.data.name}\` — ${c.data.description}`);
 
-    // Create an embed for a cleaner look
-    const helpEmbed = new EmbedBuilder()
-      .setColor('#00FF7F')
-      .setTitle('Available Commands')
-      .setDescription(`Below is a list of my commands with their descriptions. Use \`${COMMAND_PREFIX}\` followed by the command name to run a command.`)
-      .addFields({ name: 'Commands', value: commandList })
-      .setFooter({ text: `Prefix: ${COMMAND_PREFIX}` })
-      .setTimestamp();
+    // Chunk lines to respect DESC_LIMIT
+    const embeds = [];
+    let buffer = '';
+    let page = 1;
 
-    await message.reply({ embeds: [helpEmbed] });
+    for (const line of lines) {
+      if (buffer.length + line.length + 1 > DESC_LIMIT) {
+        embeds.push(makeEmbed(buffer, PREFIX, page++));
+        buffer = '';
+      }
+      buffer += line + '\n';
+    }
+    embeds.push(makeEmbed(buffer, PREFIX, page));
+
+    for (const embed of embeds) await message.reply({ embeds: [embed] });
+    logger.debug(`Sent help (${commands.length} commands) to ${message.author.tag}`);
   },
 };
+
+function makeEmbed(text, prefix, page) {
+  return new EmbedBuilder()
+    .setColor(EMBED_COLOUR)
+    .setTitle(`Available Commands${page > 1 ? ` – Page ${page}` : ''}`)
+    .setDescription(text)
+    .setFooter({ text: `Prefix: ${prefix}` })
+    .setTimestamp();
+}
