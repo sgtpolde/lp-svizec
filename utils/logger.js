@@ -1,73 +1,54 @@
 // utils/logger.js
+// ---------------------------------------------------------------------------
+// Console‑only Winston logger.
+//  • Local TTY  → coloured lines with emoji
+//  • PM2/CI     → plain lines (no escape codes, no JSON)
+// ---------------------------------------------------------------------------
 
 const { createLogger, format, transports } = require('winston');
 
-// ---------------------------------------------------------------------------
-// #1  Settings & util maps
-// ---------------------------------------------------------------------------
-const LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
-const IS_PROD = process.env.NODE_ENV === 'production';
+const LEVEL = process.env.LOG_LEVEL ?? 'info';
+const IS_TTY = process.stdout.isTTY; // false when PM2 captures stdout
 
-// Cute unicode icons for quick scanning in dev console
-const LEVEL_ICONS = {
-  error: '❌',
-  warn: '⚠️',
-  info: 'ℹ️',
-  http: '🌐',
-  verbose: '🔍',
-  debug: '🐛',
-  silly: '🤪',
-};
+// Emoji only if colour is on (TTY)
+const ICON = { error: '❌', warn: '⚠️', info: 'ℹ️', http: '🌐', debug: '🐛' };
 
-// ---------------------------------------------------------------------------
-// #2  Custom formats
-// ---------------------------------------------------------------------------
-const devPrintf = format.printf(({ timestamp, level, message, label, stack, ...meta }) => {
-  const icon = LEVEL_ICONS[level] || '';
-  const lbl = label ? `[${label}] ` : '';
-  const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
-  const line = stack ?? message;
-  return `${timestamp} ${icon} ${level.toUpperCase()} ${lbl}${line}${metaStr}`;
+const oneLine = format.printf(({ timestamp, level, label, message, stack }) => {
+  const emoji = IS_TTY ? `${ICON[level] ?? ''} ` : '';
+  const scope = label ? `[${label}] ` : '';
+  return `${timestamp} ${emoji}${level.toUpperCase()} ${scope}${stack ?? message}`;
 });
 
-const baseFormat = format.combine(
-  format.errors({ stack: true }), // log .stack for Error objects
-  format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-  IS_PROD ? format.uncolorize() : format.colorize({ all: true }),
-  IS_PROD ? format.json() : devPrintf
-);
-
-// ---------------------------------------------------------------------------
-// #3  Logger instance
-// ---------------------------------------------------------------------------
 const logger = createLogger({
-  level: LOG_LEVEL,
-  format: baseFormat,
+  level: LEVEL,
+  format: format.combine(
+    format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    format.errors({ stack: true }),
+    IS_TTY ? format.colorize({ all: true }) : format.uncolorize(),
+    oneLine
+  ),
   transports: [new transports.Console({ handleExceptions: true })],
 });
 
-// ---------------------------------------------------------------------------
-// #4  Timing helpers (similar to console.time)
-// ---------------------------------------------------------------------------
-const __timers = new Map();
+/* helper: logger.childLogger('module') */
+logger.childLogger = lbl => logger.child({ label: lbl });
 
-logger.time = label => {
-  if (!label) return;
-  __timers.set(label, process.hrtime.bigint());
+/* console.time‑like helpers */
+const timers = new Map();
+logger.time = l => l && timers.set(l, process.hrtime.bigint());
+logger.timeEnd = (l, note = '') => {
+  const s = timers.get(l);
+  if (!s) return logger.warn(`Timer "${l}" does not exist.`);
+  timers.delete(l);
+  const ms = Number(process.hrtime.bigint() - s) / 1e6;
+  logger.info(`${note ? note + ' – ' : ''}${l}: ${ms.toFixed(1)} ms`);
 };
 
-logger.timeEnd = (label, msg = '') => {
-  const start = __timers.get(label);
-  if (!start) {
-    logger.warn(`Timer "${label}" does not exist.`);
-    return;
-  }
-  const durationMs = Number(process.hrtime.bigint() - start) / 1e6; // ns → ms
-  __timers.delete(label);
-  logger.info(`${msg ? msg + ' – ' : ''}${label}: ${durationMs.toFixed(1)} ms`);
-};
+/* http alias */
+logger.http = (...args) => logger.log('http', ...args);
 
-// ---------------------------------------------------------------------------
-// #5  Export
-// ---------------------------------------------------------------------------
+/* surface crashes */
+process.on('unhandledRejection', err => logger.error(err.stack || err));
+process.on('uncaughtException',  err => logger.error(err.stack || err));
+
 module.exports = logger;

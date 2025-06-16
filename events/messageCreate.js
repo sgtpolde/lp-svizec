@@ -1,80 +1,81 @@
 // events/messageCreate.js
 
 const { Collection } = require('discord.js');
-const logger = require('../utils/logger').child({ label: 'events/messageCreate' });
+const logger = require('../utils/logger').childLogger('events/messageCreate');
 
-const COMMAND_PREFIX = process.env.COMMAND_PREFIX || '!';
-const DEFAULT_COOLDOWN_SEC = 3;
-const cooldowns = new Collection(); // commandName → userId → timestamp
+const PREFIX = process.env.COMMAND_PREFIX || '!';
+const DEFAULT_CD_SEC = 3;
+
+// cooldowns: Map<command, Collection<userId, expiresAt>>
+const cooldowns = new Map();
+
+// compiled once
+const ARG_RX = /"([^"]+)"|'([^']+)'|(\S+)/g;
 
 module.exports = {
   name: 'messageCreate',
-  /**
-   * @param {import('discord.js').Message} message
-   * @param {import('discord.js').Client}  client
-   */
-  async execute(message, client) {
-    // -- Ignore bot & prefixless messages
-    if (message.author.bot || !message.content.startsWith(COMMAND_PREFIX)) return;
 
-    // -- Parse command + args (quoted strings allowed)
-    const withoutPrefix = message.content.slice(COMMAND_PREFIX.length).trim();
-    const [commandName, ...args] = tokenize(withoutPrefix);
-    if (!commandName) return;
+  /** @param {import("discord.js").Message} msg @param {import("discord.js").Client} client */
+  async execute(msg, client) {
+    if (msg.author.bot || !msg.content.startsWith(PREFIX)) return;
 
-    const command = client.commands.get(commandName.toLowerCase());
-    if (!command) {
-      logger.warn(`Unknown command "${commandName}" from ${message.author.tag}`);
-      await message.reply(
-        `I don't recognize the command \`${commandName}\`. Try \`${COMMAND_PREFIX}help\` for a list of commands.`
+    // ---------- parse command + args --------------------------------------
+    const body = msg.content.slice(PREFIX.length).trim();
+    const [cmdNameRaw, ...args] = tokenize(body);
+    if (!cmdNameRaw) return;
+
+    const cmd = client.commands.get(cmdNameRaw.toLowerCase());
+    if (!cmd) {
+      await msg.reply(
+        `Unknown command \`${cmdNameRaw}\`. Try \`${PREFIX}help\` for a list of commands.`,
       );
+      logger.warn(`Unknown command "${cmdNameRaw}" from ${msg.author.tag}`);
       return;
     }
 
-    // -- Cooldown check
-    const now = Date.now();
-    const userTimestamps = cooldowns.ensure(command.data.name, () => new Collection());
-    const cooldownMs = (command.cooldown ?? DEFAULT_COOLDOWN_SEC) * 1000;
+    // ---------- cooldown guard -------------------------------------------
+    if (await inCooldown(cmd, msg)) return;
 
-    const expiration = userTimestamps.get(message.author.id);
-    if (expiration && now < expiration) {
-      const timeLeft = ((expiration - now) / 1000).toFixed(1);
-      await message.reply(
-        `Please wait ${timeLeft}s before reusing the \`${command.data.name}\` command.`
-      );
-      return;
-    }
-    userTimestamps.set(message.author.id, now + cooldownMs);
-
+    // ---------- run command ----------------------------------------------
+    const timer = `${cmd.data.name}-${msg.id}`;
+    logger.time(timer);
     try {
-      logger.time(command.data.name); // start timer
-      await command.execute(message, args, client);
-      logger.timeEnd(command.data.name, `Ran by ${message.author.tag}`);
+      await cmd.execute(msg, args, client);
+      logger.timeEnd(timer, `by ${msg.author.tag}`);
     } catch (err) {
-      logger.error(`Command "${command.data.name}" failed – ${err.stack || err}`);
-      await message.reply('❌  An unexpected error occurred while executing that command.');
+      logger.error(`Cmd "${cmd.data.name}" failed – ${err.stack || err}`);
+      await msg.reply('❌  An unexpected error occurred while executing that command.');
     }
   },
 };
 
-// ----------------------------------------------------
-// helper – split string by spaces but keep quoted substrings intact
-// e.g.  \"Add My Name\" 1234 euw  → ["Add My Name", "1234", "euw"]
-// ----------------------------------------------------
-function tokenize(input) {
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+function tokenize(str) {
   const tokens = [];
-  const regex = /"([^"]+)"|'([^']+)'|(\S+)/g;
-  let match;
-  while ((match = regex.exec(input)) !== null) {
-    tokens.push(match[1] || match[2] || match[3]);
-  }
+  let m;
+  ARG_RX.lastIndex = 0; // reset regex state
+  while ((m = ARG_RX.exec(str)) !== null) tokens.push(m[1] || m[2] || m[3]);
   return tokens;
 }
 
-// tiny util on Collection prototype
-Collection.prototype.ensure = function (key, factory) {
-  if (this.has(key)) return this.get(key);
-  const val = factory(key, this);
-  this.set(key, val);
-  return val;
-};
+async function inCooldown(cmd, msg) {
+  const bucket =
+    cooldowns.get(cmd.data.name) ??
+    cooldowns.set(cmd.data.name, new Collection()).get(cmd.data.name);
+
+  const now = Date.now();
+  const cdMs = (cmd.cooldown ?? DEFAULT_CD_SEC) * 1000;
+  const exp = bucket.get(msg.author.id);
+
+  if (exp && now < exp) {
+    const left = ((exp - now) / 1000).toFixed(1);
+    await msg.reply(`Please wait ${left}s before using \`${cmd.data.name}\` again.`);
+    return true;
+  }
+
+  bucket.set(msg.author.id, now + cdMs);
+  setTimeout(() => bucket.delete(msg.author.id), cdMs);
+  return false;
+}
