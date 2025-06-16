@@ -30,15 +30,23 @@ module.exports = {
     const rankings = buildSortedRankings(accounts).slice(0, MAX_ENTRIES);
     const embed = makeEmbed(rankings);
 
-    // scheduled (no message) -> broadcast
+    // ─── Scheduled run (message == null) – broadcast if changed ────────────
     if (!message) {
+      const embed = makeEmbed(rankings);
+      const hash = embed.data.description; // simple content hash
+
       const settings = await GuildSettings.find();
       for (const { guildId, channelId } of settings) {
         try {
+          if (lastSent.get(channelId) === hash) continue; // identical → skip
+
           const chan = await client.channels.fetch(channelId);
-          if (chan?.isTextBased()) await chan.send({ embeds: [embed] });
-        } catch (err) {
-          logger.warn(`Broadcast to ${guildId}/${channelId} failed – ${err.message}`);
+          if (chan?.isTextBased()) {
+            await chan.send({ embeds: [embed] });
+            lastSent.set(channelId, hash); // cache new hash
+          }
+        } catch (e) {
+          logger.warn(`Broadcast to ${guildId}/${channelId} failed – ${e.message}`);
         }
       }
       return;
@@ -70,7 +78,16 @@ function buildSortedRankings(accs) {
 
 function rankScore({ tier, div, lp }) {
   const tiers = [
-    'IRON','BRONZE','SILVER','GOLD','PLATINUM','EMERALD','DIAMOND','MASTER','GRANDMASTER','CHALLENGER',
+    'IRON',
+    'BRONZE',
+    'SILVER',
+    'GOLD',
+    'PLATINUM',
+    'EMERALD',
+    'DIAMOND',
+    'MASTER',
+    'GRANDMASTER',
+    'CHALLENGER',
   ];
   const divVal = { IV: 1, III: 2, II: 3, I: 4, '': 5 };
   const idx = tiers.indexOf(tier.toUpperCase());

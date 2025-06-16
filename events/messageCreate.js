@@ -1,7 +1,7 @@
 // events/messageCreate.js
 
 const { Collection } = require('discord.js');
-const logger = require('../utils/logger').childLogger('events/messageCreate');
+const logger = require('../utils/logger').child({ label: 'events/messageCreate' });
 
 const PREFIX = process.env.COMMAND_PREFIX || '!';
 const DEFAULT_CD_SEC = 3;
