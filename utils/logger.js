@@ -49,6 +49,6 @@ logger.http = (...args) => logger.log('http', ...args);
 
 /* surface crashes */
 process.on('unhandledRejection', err => logger.error(err.stack || err));
-process.on('uncaughtException',  err => logger.error(err.stack || err));
+process.on('uncaughtException', err => logger.error(err.stack || err));
 
 module.exports = logger;

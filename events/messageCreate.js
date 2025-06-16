@@ -27,7 +27,7 @@ module.exports = {
     const cmd = client.commands.get(cmdNameRaw.toLowerCase());
     if (!cmd) {
       await msg.reply(
-        `Unknown command \`${cmdNameRaw}\`. Try \`${PREFIX}help\` for a list of commands.`,
+        `Unknown command \`${cmdNameRaw}\`. Try \`${PREFIX}help\` for a list of commands.`
       );
       logger.warn(`Unknown command "${cmdNameRaw}" from ${msg.author.tag}`);
       return;
