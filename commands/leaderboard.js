@@ -5,7 +5,7 @@ const GuildSettings = require('../models/GuildSettings');
 const { EmbedBuilder } = require('discord.js');
 const { TIER_EMOJIS } = require('../utils/constants');
 const { capitalizeFirst } = require('../utils/helpers');
-const logger = require('../utils/logger').childLogger('commands/leaderboard');
+const logger = require('../utils/logger').child({ label: 'commands/leaderboard' });
 
 const MAX_ENTRIES = 50; // Discord embed desc cap ≈ 4k chars
 
