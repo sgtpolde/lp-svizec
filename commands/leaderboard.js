@@ -30,20 +30,14 @@ module.exports = {
     const rankings = buildSortedRankings(accounts).slice(0, MAX_ENTRIES);
     const embed = makeEmbed(rankings);
 
-    // ─── Scheduled run (message == null) – broadcast if changed ────────────
+    // ─── Scheduled run (message == null) – broadcast every 4h ──────────────
     if (!message) {
-      const embed = makeEmbed(rankings);
-      const hash = embed.data.description; // simple content hash
-
       const settings = await GuildSettings.find();
       for (const { guildId, channelId } of settings) {
         try {
-          if (lastSent.get(channelId) === hash) continue; // identical → skip
-
           const chan = await client.channels.fetch(channelId);
           if (chan?.isTextBased()) {
             await chan.send({ embeds: [embed] });
-            lastSent.set(channelId, hash); // cache new hash
           }
         } catch (e) {
           logger.warn(`Broadcast to ${guildId}/${channelId} failed – ${e.message}`);
