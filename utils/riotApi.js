@@ -93,10 +93,10 @@ const RiotAPI = {
   },
 
   /* Ranked stats */
-  getRankedStats(summonerId, region) {
+  getRankedStats(puuid, region) {
     return get(
-      `https://${platformHost(region)}/lol/league/v4/entries/by-summoner/${summonerId}`,
-      'getRankedStats'
+      `https://${platformHost(region)}/lol/league/v4/entries/by-puuid/${puuid}`,
+      'getRankedStatsByPUUID'
     );
   },
 

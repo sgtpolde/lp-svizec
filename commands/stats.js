@@ -79,7 +79,7 @@ async function processAccount(acc, guildChannel, client) {
     if (!part) continue;
 
     // Current ranked stats
-    const ranked = await getRankedStats(summonerId, region);
+    const ranked = await getRankedStats(puuid, region);
     const solo = ranked.find(q => q.queueType === 'RANKED_SOLO_5x5');
 
     const { currentLP, currentRank, totalWins, totalLosses, winPercentage } = parseSoloStats(solo);
