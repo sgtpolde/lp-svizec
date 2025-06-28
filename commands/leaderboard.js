@@ -6,6 +6,7 @@ const { EmbedBuilder } = require('discord.js');
 const { TIER_EMOJIS } = require('../utils/constants');
 const { capitalizeFirst } = require('../utils/helpers');
 const logger = require('../utils/logger').child({ label: 'commands/leaderboard' });
+const { getRankedStats } = require('../utils/riotApi');
 
 const MAX_ENTRIES = 50; // Discord embed desc cap ≈ 4k chars
 
@@ -27,8 +28,8 @@ module.exports = {
       return;
     }
 
-    const rankings = buildSortedRankings(accounts).slice(0, MAX_ENTRIES);
-    const embed = makeEmbed(rankings);
+    const rankings = await buildSortedRankings(accounts);
+    const embed = makeEmbed(rankings.slice(0, MAX_ENTRIES));
 
     // ─── Scheduled run (message == null) – broadcast every 4h ──────────────
     if (!message) {
@@ -54,20 +55,47 @@ module.exports = {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
-function buildSortedRankings(accs) {
-  return accs
-    .map(a => {
-      const last = a.lpHistory?.at(-1);
-      const [tier = 'UNRANKED', div = ''] = last?.rank?.split(' ') ?? [];
-      return {
-        name: `${a.gameName}#${a.tagLine}`,
-        region: a.region.toUpperCase(),
-        tier: tier.toUpperCase(),
-        div,
-        lp: last?.lp ?? 0,
-      };
-    })
-    .sort((x, y) => rankScore(y) - rankScore(x));
+async function buildSortedRankings(accs) {
+  const rankings = [];
+
+  for (const a of accs) {
+    const last = a.lpHistory?.at(-1);
+    const [tier = 'UNRANKED', div = ''] = last?.rank?.split(' ') ?? [];
+
+    let wins = 0,
+      losses = 0,
+      totalGamesPlayed = 0,
+      winRate = 0;
+
+    try {
+      // Fetch current ranked stats to get wins/losses
+      const rankedStats = await getRankedStats(a.puuid, a.region);
+      const soloQueue = rankedStats.find(q => q.queueType === 'RANKED_SOLO_5x5');
+
+      if (soloQueue) {
+        wins = soloQueue.wins;
+        losses = soloQueue.losses;
+        totalGamesPlayed = wins + losses;
+        winRate = totalGamesPlayed > 0 ? Math.round((wins / totalGamesPlayed) * 100) : 0;
+      }
+    } catch (error) {
+      logger.warn(`Failed to fetch ranked stats for ${a.gameName}#${a.tagLine}: ${error.message}`);
+    }
+
+    rankings.push({
+      name: `${a.gameName}#${a.tagLine}`,
+      region: a.region.toUpperCase(),
+      tier: tier.toUpperCase(),
+      div,
+      lp: last?.lp ?? 0,
+      wins,
+      losses,
+      totalGamesPlayed,
+      winRate,
+    });
+  }
+
+  return rankings.sort((x, y) => rankScore(y) - rankScore(x));
 }
 
 function rankScore({ tier, div, lp }) {
@@ -95,8 +123,14 @@ function makeEmbed(rankings) {
       const rankTxt =
         r.tier === 'UNRANKED'
           ? 'Unranked'
-          : `${capitalizeFirst(r.tier.toLowerCase())} ${r.div} (${r.lp} LP)`;
-      return `**${i + 1}. ${r.name} (${r.region})** — ${emoji} ${rankTxt}`;
+          : `${capitalizeFirst(r.tier.toLowerCase())} ${r.div} (${r.lp} LP)`;
+
+      const gamesInfo =
+        r.totalGamesPlayed > 0
+          ? ` • ${r.totalGamesPlayed}G (${r.wins}W/${r.losses}L) ${r.winRate}%`
+          : '';
+
+      return `**${i + 1}. ${r.name} (${r.region})** — ${emoji} ${rankTxt}${gamesInfo}`;
     })
     .join('\n');
 

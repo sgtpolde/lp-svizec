@@ -3,7 +3,7 @@
 const cron = require('node-cron');
 const logger = require('../utils/logger').child({ label: 'events/ready' });
 
-const CRON_STATS = '*/5 * * * *'; // every 5 minutes
+const CRON_STATS = '*/3 * * * *'; // every 5 minutes
 const CRON_LEADERBOARD = '0 */4 * * *'; // at hh:00 every 4 hours
 
 let statsTask = null;
