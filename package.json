@@ -11,22 +11,22 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@eslint/js": "^9.29.0",
-    "axios": "^1.10.0",
-    "canvas": "^3.1.0",
+    "@eslint/js": "^9.32.0",
+    "axios": "^1.11.0",
+    "canvas": "^3.1.2",
     "chart.js": "^4.5.0",
     "chartjs-plugin-annotation": "^3.1.0",
-    "discord.js": "^14.19.3",
-    "dotenv": "^16.5.0",
+    "discord.js": "^14.21.0",
+    "dotenv": "^17.2.1",
     "express": "^5.1.0",
-    "mongoose": "^8.15.2",
-    "node-cron": "^4.1.0",
+    "mongoose": "^8.16.5",
+    "node-cron": "^4.2.1",
     "winston": "^3.17.0"
   },
   "devDependencies": {
-    "eslint": "^9.29.0",
-    "eslint-config-prettier": "^10.1.5",
-    "eslint-plugin-prettier": "^5.4.1",
-    "prettier": "^3.5.3"
+    "eslint": "^9.32.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.3",
+    "prettier": "^3.6.2"
   }
 }
