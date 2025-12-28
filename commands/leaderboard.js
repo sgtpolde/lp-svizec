@@ -9,6 +9,7 @@ const logger = require('../utils/logger').child({ label: 'commands/leaderboard' 
 const { getRankedStats } = require('../utils/riotApi');
 
 const MAX_ENTRIES = 50; // Discord embed desc cap ≈ 4k chars
+const MIN_GAMES_FOR_QUALIFICATION = 100; // Mark as Disqualified if below this
 
 module.exports = {
   data: {
@@ -28,8 +29,8 @@ module.exports = {
       return;
     }
 
-    const rankings = await buildSortedRankings(accounts);
-    const embed = makeEmbed(rankings.slice(0, MAX_ENTRIES));
+  const rankings = await buildSortedRankings(accounts);
+  const embed = makeEmbed(rankings);
 
     // ─── Scheduled run (message == null) – broadcast every 4h ──────────────
     if (!message) {
@@ -117,23 +118,62 @@ function rankScore({ tier, div, lp }) {
 }
 
 function makeEmbed(rankings) {
-  const desc = rankings
-    .map((r, i) => {
+  // Partition into Qualified and Disqualified
+  const qualified = [];
+  const disqualified = [];
+  for (const r of rankings) {
+    if (r.totalGamesPlayed >= MIN_GAMES_FOR_QUALIFICATION) qualified.push(r);
+    else disqualified.push(r);
+  }
+
+  // Rankings are already sorted by rankScore; keep that for qualified.
+  // For DQ bracket, sort by total games played (desc), then wins (desc) as tiebreaker.
+  disqualified.sort((a, b) => {
+    if (b.totalGamesPlayed !== a.totalGamesPlayed) return b.totalGamesPlayed - a.totalGamesPlayed;
+    return b.wins - a.wins;
+  });
+
+  // Build lines with a cap of MAX_ENTRIES total
+  const lines = [];
+  if (qualified.length) {
+    lines.push('**Qualified**');
+    for (let i = 0; i < qualified.length && lines.length - 1 < MAX_ENTRIES; i++) {
+      const r = qualified[i];
       const emoji = TIER_EMOJIS[r.tier] ?? TIER_EMOJIS.UNRANKED;
       const rankTxt =
         r.tier === 'UNRANKED'
           ? 'Unranked'
           : `${capitalizeFirst(r.tier.toLowerCase())} ${r.div} (${r.lp} LP)`;
-
       const gamesInfo =
         r.totalGamesPlayed > 0
           ? ` • ${r.totalGamesPlayed}G (${r.wins}W/${r.losses}L) ${r.winRate}%`
           : '';
+      lines.push(`**${i + 1}. ${r.name} (${r.region})** — ${emoji} ${rankTxt}${gamesInfo}`);
+    }
+  }
 
-      return `**${i + 1}. ${r.name} (${r.region})** — ${emoji} ${rankTxt}${gamesInfo}`;
-    })
-    .join('\n');
+  if (disqualified.length && lines.length < MAX_ENTRIES) {
+    if (lines.length) lines.push('');
+    lines.push(`**Disqualified (< ${MIN_GAMES_FOR_QUALIFICATION} games)**`);
+    const startIdx = lines.length;
+    let count = 0;
+    for (let i = 0; i < disqualified.length && lines.length < MAX_ENTRIES + startIdx; i++) {
+      const r = disqualified[i];
+      const emoji = TIER_EMOJIS[r.tier] ?? TIER_EMOJIS.UNRANKED;
+      const rankTxt =
+        r.tier === 'UNRANKED'
+          ? 'Unranked'
+          : `${capitalizeFirst(r.tier.toLowerCase())} ${r.div} (${r.lp} LP)`;
+      const gamesInfo =
+        r.totalGamesPlayed > 0
+          ? ` • ${r.totalGamesPlayed}G (${r.wins}W/${r.losses}L) ${r.winRate}%`
+          : '';
+      count++;
+      lines.push(`• ${r.name} (${r.region}) — ${emoji} ${rankTxt}${gamesInfo}`);
+    }
+  }
 
+  const desc = lines.join('\n');
   return new EmbedBuilder()
     .setColor(0xffd700)
     .setTitle('🏆 Leaderboard')
