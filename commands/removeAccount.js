@@ -1,37 +1,48 @@
 // commands/removeAccount.js
 
-const Account = require('../models/Account');
-const { EmbedBuilder } = require('discord.js');
-const { VALID_REGIONS, REGION_ALIASES } = require('../utils/constants');
-const logger = require('../utils/logger').child({ label: 'commands/removeAccount' });
+import Account from '../models/Account.js';
+import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
+import { VALID_REGIONS, REGION_ALIASES } from '../utils/constants.js';
+import logger from '../utils/logger.js';
 
-module.exports = {
-  data: {
-    name: 'removeaccount',
-    description: 'Stop tracking a League of Legends account',
-  },
+const childLogger = logger.child({ label: 'commands/removeAccount' });
+
+export default {
+  data: new SlashCommandBuilder()
+    .setName('removeaccount')
+    .setDescription('Stop tracking a League of Legends account')
+    .addStringOption(option =>
+      option
+        .setName('gamename')
+        .setDescription('The summoner game name (without tag)')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName('tagline')
+        .setDescription('The summoner tag line (without #)')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName('region')
+        .setDescription('The server region')
+        .setRequired(true)
+        .addChoices(...VALID_REGIONS.map(r => ({ name: r.toUpperCase(), value: r })))
+    ),
 
   /**
-   * @param {import('discord.js').Message} message
-   * @param {string[]} args
+   * @param {import('discord.js').ChatInputCommandInteraction} interaction
    */
-  async execute(message, args) {
-    if (args.length < 3) {
-      await message.reply('❌  Usage: `!removeaccount <GameName> <TagLine> <Region>`');
-      return;
-    }
-
-    const [gameName, tagLine, rawRegion] = args;
+  async execute(interaction) {
+    const gameName = interaction.options.getString('gamename');
+    const tagLine = interaction.options.getString('tagline');
+    const rawRegion = interaction.options.getString('region');
     const region = REGION_ALIASES[rawRegion.toLowerCase()] || rawRegion.toLowerCase();
-
-    if (!VALID_REGIONS.includes(region)) {
-      await message.reply(`❌  Invalid region. Valid regions: ${VALID_REGIONS.join(', ')}`);
-      return;
-    }
 
     try {
       const removed = await Account.findOneAndDelete({
-        discordId: message.author.id,
+        discordId: interaction.user.id,
         gameName,
         tagLine,
         region,
@@ -43,13 +54,16 @@ module.exports = {
         .setDescription(`${gameName}#${tagLine} (${region.toUpperCase()})`)
         .setTimestamp();
 
-      await message.reply({ embeds: [embed] });
-      logger.info(
-        `${removed ? 'Removed' : 'Not found'} account ${gameName}#${tagLine} (${region}) for ${message.author.tag}`
+      await interaction.reply({ embeds: [embed] });
+      childLogger.info(
+        `${removed ? 'Removed' : 'Not found'} account ${gameName}#${tagLine} (${region}) for ${interaction.user.tag}`
       );
     } catch (err) {
-      logger.error(`removeAccount failed → ${err.stack || err}`);
-      await message.reply('❌  An error occurred while removing the account.');
+      childLogger.error(`removeAccount failed → ${err.stack || err}`);
+      await interaction.reply({
+        content: '❌  An error occurred while removing the account.',
+        ephemeral: true,
+      });
     }
   },
 };

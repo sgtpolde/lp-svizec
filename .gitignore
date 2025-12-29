@@ -18,3 +18,9 @@ Thumbs.db
 # Ignore IDE specific files
 .vscode/
 .idea/
+
+# Ignore .claude files
+.claude/
+
+# Enviroment specific ignores
+.env.prod

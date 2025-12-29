@@ -1,49 +1,73 @@
 // commands/clear.js
 
-const { PermissionsBitField, EmbedBuilder, Collection } = require('discord.js');
-const logger = require('../utils/logger').child({ label: 'commands/clear' });
+import { PermissionsBitField, EmbedBuilder, Collection, SlashCommandBuilder } from 'discord.js';
+import logger from '../utils/logger.js';
+
+const childLogger = logger.child({ label: 'commands/clear' });
 
 const TWO_WEEKS = 14 * 24 * 60 * 60 * 1000;
 const MAX_DELETE = 10_000; // Discord hard cap we enforce
 
-module.exports = {
-  data: {
-    name: 'clear',
-    description: 'Delete a number of recent messages or purge the entire channel.',
-  },
+export default {
+  data: new SlashCommandBuilder()
+    .setName('clear')
+    .setDescription('Delete a number of recent messages or purge the entire channel')
+    .addIntegerOption(option =>
+      option
+        .setName('amount')
+        .setDescription('Number of messages to delete (leave empty to purge all)')
+        .setMinValue(1)
+        .setMaxValue(100)
+        .setRequired(false)
+    )
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages),
 
   /**
-   * @param {import('discord.js').Message} message
-   * @param {string[]} args
+   * @param {import('discord.js').ChatInputCommandInteraction} interaction
    */
-  async execute(message, args) {
-    if (!message.inGuild()) return;
+  async execute(interaction) {
+    if (!interaction.inGuild()) return;
 
     // — Permission checks —
-    const missing = missingPerms(message);
+    const missing = missingPerms(interaction);
     if (missing) {
-      await message.reply(missing);
+      await interaction.reply({ content: missing, ephemeral: true });
       return;
     }
 
-    const amount = parseInt(args[0], 10);
-    const purgeAll = !amount || amount <= 0;
+    const amount = interaction.options.getInteger('amount');
+    const purgeAll = !amount;
 
     if (purgeAll) {
-      const proceed = await confirm(
-        message,
-        '⚠️  Delete **ALL** messages in this channel? Type `yes` within 15 s to confirm.'
-      );
-      if (!proceed) return;
-      const deleted = await purgeChannel(message.channel);
-      await sendEmbed(message.channel, `Deleted **${deleted}** messages – full purge complete.`);
-    } else {
-      if (amount > MAX_DELETE) {
-        await message.reply(`❌  You can delete at most ${MAX_DELETE} messages at once.`);
+      await interaction.reply({
+        content:
+          '⚠️  Delete **ALL** messages in this channel? Use the button below to confirm within 30 seconds.',
+        ephemeral: true,
+      });
+
+      const proceed = await confirmWithButton(interaction);
+      if (!proceed) {
+        await interaction.editReply({ content: '❌  Cancelled.', components: [] });
         return;
       }
-      const deleted = await purgeChannel(message.channel, amount + 1); // +1 to include command msg
-      await sendEmbed(message.channel, `Deleted **${deleted}** messages.`);
+
+      await interaction.editReply({ content: '🔄  Deleting all messages...', components: [] });
+      const deleted = await purgeChannel(interaction.channel);
+      await sendEmbed(
+        interaction.channel,
+        `Deleted **${deleted}** messages – full purge complete.`
+      );
+    } else {
+      if (amount > MAX_DELETE) {
+        await interaction.reply({
+          content: `❌  You can delete at most ${MAX_DELETE} messages at once.`,
+          ephemeral: true,
+        });
+        return;
+      }
+      await interaction.deferReply({ ephemeral: true });
+      const deleted = await purgeChannel(interaction.channel, amount);
+      await interaction.editReply(`✅  Deleted **${deleted}** messages.`);
     }
   },
 };
@@ -51,36 +75,50 @@ module.exports = {
 // --------------------------------------------------------
 // helpers
 // --------------------------------------------------------
-function missingPerms(message) {
-  if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+function missingPerms(interaction) {
+  if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
     return '❌  You need **Manage Messages** permission to use this command.';
   }
-  if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+  if (!interaction.guild.members.me.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
     return '❌  I need **Manage Messages** permission to delete messages.';
   }
   return null;
 }
 
 /**
- * Confirm dangerous action – returns boolean
+ * Confirm dangerous action with button – returns boolean
  */
-async function confirm(message, prompt) {
-  const promptMsg = await message.reply(prompt);
+async function confirmWithButton(interaction) {
+  const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = await import('discord.js');
+
+  const confirmButton = new ButtonBuilder()
+    .setCustomId('confirm_clear')
+    .setLabel('Yes, delete all messages')
+    .setStyle(ButtonStyle.Danger);
+
+  const cancelButton = new ButtonBuilder()
+    .setCustomId('cancel_clear')
+    .setLabel('Cancel')
+    .setStyle(ButtonStyle.Secondary);
+
+  const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
+
+  await interaction.editReply({
+    content: '⚠️  Delete **ALL** messages in this channel?',
+    components: [row],
+  });
+
   try {
-    const collected = await message.channel.awaitMessages({
-      filter: m => m.author.id === message.author.id && m.content.toLowerCase() === 'yes',
-      max: 1,
-      time: 15_000,
-      errors: ['time'],
+    const buttonInteraction = await interaction.channel.awaitMessageComponent({
+      filter: i =>
+        i.user.id === interaction.user.id &&
+        (i.customId === 'confirm_clear' || i.customId === 'cancel_clear'),
+      time: 30_000,
     });
-    await promptMsg.delete().catch(() => {});
-    await collected
-      .first()
-      .delete()
-      .catch(() => {});
-    return true;
+
+    await buttonInteraction.deferUpdate();
+    return buttonInteraction.customId === 'confirm_clear';
   } catch {
-    await promptMsg.edit('❌  Cancelled.');
     return false;
   }
 }
@@ -104,7 +142,7 @@ async function purgeChannel(channel, limit) {
         .bulkDelete(slice, true)
         .then(c => c.size ?? c.length)
         .catch(err => {
-          logger.warn(err);
+          childLogger.warn(err);
           return 0;
         });
       removed += deleted;

@@ -1,7 +1,9 @@
 // events/messageCreate.js
 
-const { Collection } = require('discord.js');
-const logger = require('../utils/logger').child({ label: 'events/messageCreate' });
+import { Collection } from 'discord.js';
+import logger from '../utils/logger.js';
+
+const childLogger = logger.child({ label: 'events/messageCreate' });
 
 const PREFIX = process.env.COMMAND_PREFIX || '!';
 const DEFAULT_CD_SEC = 3;
@@ -12,7 +14,7 @@ const cooldowns = new Map();
 // compiled once
 const ARG_RX = /"([^"]+)"|'([^']+)'|(\S+)/g;
 
-module.exports = {
+export default {
   name: 'messageCreate',
 
   /** @param {import("discord.js").Message} msg @param {import("discord.js").Client} client */
@@ -29,7 +31,7 @@ module.exports = {
       await msg.reply(
         `Unknown command \`${cmdNameRaw}\`. Try \`${PREFIX}help\` for a list of commands.`
       );
-      logger.warn(`Unknown command "${cmdNameRaw}" from ${msg.author.tag}`);
+      childLogger.warn(`Unknown command "${cmdNameRaw}" from ${msg.author.tag}`);
       return;
     }
 
@@ -38,12 +40,12 @@ module.exports = {
 
     // ---------- run command ----------------------------------------------
     const timer = `${cmd.data.name}-${msg.id}`;
-    logger.time(timer);
+    childLogger.time(timer);
     try {
       await cmd.execute(msg, args, client);
-      logger.timeEnd(timer, `by ${msg.author.tag}`);
+      childLogger.timeEnd(timer, `by ${msg.author.tag}`);
     } catch (err) {
-      logger.error(`Cmd "${cmd.data.name}" failed – ${err.stack || err}`);
+      childLogger.error(`Cmd "${cmd.data.name}" failed – ${err.stack || err}`);
       await msg.reply('❌  An unexpected error occurred while executing that command.');
     }
   },

@@ -1,10 +1,34 @@
 {
   "name": "lp-svizec",
-  "version": "2.0.0",
+  "version": "3.0.0",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "format": "prettier --write ."
+    "dev": "nodemon index.js",
+    "deploy": "node deploy-commands.js",
+    "deploy:guild": "node deploy-commands.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "nodemonConfig": {
+    "watch": [
+      "commands",
+      "events",
+      "models",
+      "utils",
+      "services",
+      "index.js"
+    ],
+    "ext": "js,json",
+    "ignore": [
+      "node_modules/**",
+      "logs/**",
+      "*.log"
+    ],
+    "delay": 1000
   },
   "keywords": [],
   "author": "",
@@ -27,6 +51,7 @@
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
+    "nodemon": "^3.1.11",
     "prettier": "^3.7.4"
   }
 }

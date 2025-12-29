@@ -1,31 +1,39 @@
 // commands/init.js
 
-const { PermissionsBitField, EmbedBuilder } = require('discord.js');
-const GuildSettings = require('../models/GuildSettings');
-const logger = require('../utils/logger').child({ label: 'commands/init' });
+import { PermissionsBitField, EmbedBuilder, SlashCommandBuilder } from 'discord.js';
+import GuildSettings from '../models/GuildSettings.js';
+import logger from '../utils/logger.js';
 
-module.exports = {
-  data: {
-    name: 'init',
-    description: 'Bind the bot to the current channel for automated updates',
-  },
+const childLogger = logger.child({ label: 'commands/init' });
+
+export default {
+  data: new SlashCommandBuilder()
+    .setName('init')
+    .setDescription('Bind the bot to the current channel for automated updates')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator),
 
   /**
-   * @param {import('discord.js').Message} message
+   * @param {import('discord.js').ChatInputCommandInteraction} interaction
    */
-  async execute(message) {
-    if (!message.inGuild()) {
-      await message.reply('❌  This command can only be used inside a server.');
+  async execute(interaction) {
+    if (!interaction.inGuild()) {
+      await interaction.reply({
+        content: '❌  This command can only be used inside a server.',
+        ephemeral: true,
+      });
       return;
     }
 
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      await message.reply('❌  You need **Administrator** permission to run this.');
+    if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      await interaction.reply({
+        content: '❌  You need **Administrator** permission to run this.',
+        ephemeral: true,
+      });
       return;
     }
 
-    const guildId = message.guild.id;
-    const channelId = message.channel.id;
+    const guildId = interaction.guild.id;
+    const channelId = interaction.channel.id;
 
     try {
       const settings = await GuildSettings.findOneAndUpdate(
@@ -41,11 +49,14 @@ module.exports = {
         .setDescription(`Automated updates will now post in <#${channelId}>`)
         .setTimestamp();
 
-      await message.reply({ embeds: [embed] });
-      logger.info(`${title} for guild ${guildId} → channel ${channelId}`);
+      await interaction.reply({ embeds: [embed] });
+      childLogger.info(`${title} for guild ${guildId} → channel ${channelId}`);
     } catch (err) {
-      logger.error(`Init failed in guild ${guildId} – ${err.stack || err}`);
-      await message.reply('❌  An error occurred while initialising the bot.');
+      childLogger.error(`Init failed in guild ${guildId} – ${err.stack || err}`);
+      await interaction.reply({
+        content: '❌  An error occurred while initialising the bot.',
+        ephemeral: true,
+      });
     }
   },
 };

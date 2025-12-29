@@ -1,40 +1,42 @@
 // commands/stats.js
 
-const Account = require('../models/Account');
-const GuildSettings = require('../models/GuildSettings');
-const { EmbedBuilder } = require('discord.js');
-const {
+import Account from '../models/Account.js';
+import GuildSettings from '../models/GuildSettings.js';
+import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
+import {
   getMatchHistory,
   getMatchDetails,
   getRankedStats,
   isApiKeyValid,
-} = require('../utils/riotApi');
-const { getDDragonVersion } = require('../utils/ddragon');
-const { createProgressBar, capitalizeFirst } = require('../utils/helpers');
-const logger = require('../utils/logger').child({ label: 'commands/stats' });
+} from '../utils/riotApi.js';
+import { getDDragonVersion } from '../utils/ddragon.js';
+import { capitalizeFirst } from '../utils/helpers.js';
+import logger from '../utils/logger.js';
+
+const childLogger = logger.child({ label: 'commands/stats' });
 
 const QUEUE_SOLO = 420;
 const MAX_HISTORY = 200;
 
-module.exports = {
-  data: {
-    name: 'stats',
-    description: 'Fetch and broadcast latest ranked stats for all tracked accounts',
-  },
+export default {
+  data: new SlashCommandBuilder()
+    .setName('stats')
+    .setDescription('Fetch and broadcast latest ranked stats for all tracked accounts'),
 
   /**
-   * @param {import('discord.js').Message | null} message
-   * @param {string[] | null} _args
+   * @param {import('discord.js').ChatInputCommandInteraction | null} interaction
    * @param {import('discord.js').Client} client
    */
-  async execute(message, _args, client) {
+  async execute(interaction, client) {
     // 1. API key sanity check
     if (!(await isApiKeyValid())) {
       const msg = 'Riot API key invalid / expired – stats aborted.';
-      logger.error(msg);
-      if (message) await message.reply(`❌  ${msg}`);
+      childLogger.error(msg);
+      if (interaction) await interaction.reply({ content: `❌  ${msg}`, ephemeral: true });
       return;
     }
+
+    if (interaction) await interaction.deferReply();
 
     // 2. Pre‑fetch guild → channel map once
     const settings = await GuildSettings.find();
@@ -46,39 +48,33 @@ module.exports = {
       await processAccount(acc, guildChannel, client);
     }
 
-    if (message) await message.reply('✅  Stats update complete.');
+    if (interaction) await interaction.editReply('✅  Stats update complete.');
   },
 };
 
-// -----------------------------------------------------------------------------
-// Account worker
-// -----------------------------------------------------------------------------
 async function processAccount(acc, guildChannel, client) {
-  const { region, puuid, summonerId, gameName, tagLine } = acc;
+  const { region, puuid, gameName, tagLine } = acc;
   const lastRecord = acc.lpHistory?.at(-1) ?? null;
   let lastLP = lastRecord?.lp ?? null;
   let lastRank = lastRecord?.rank ?? 'Unranked';
 
-  // Fetch latest 20 ranked match IDs
   const matches = await getMatchHistory(puuid, region, 'ranked');
   const newIds = [];
   for (const id of matches) {
     if (id === acc.lastMatchId) break;
     newIds.push(id);
   }
-  if (!newIds.length) return; // nothing new
+  if (!newIds.length) return;
 
-  acc.lastMatchId = newIds[0]; // newest ID becomes checkpoint
+  acc.lastMatchId = newIds[0];
 
-  // Process each new match oldest → newest
   for (const matchId of newIds.reverse()) {
     const details = await getMatchDetails(matchId, region);
-    if (details.info.queueId !== QUEUE_SOLO) continue; // only soloQ
+    if (details.info.queueId !== QUEUE_SOLO) continue;
 
     const part = details.info.participants.find(p => p.puuid === puuid);
     if (!part) continue;
 
-    // Current ranked stats
     const ranked = await getRankedStats(puuid, region);
     const solo = ranked.find(q => q.queueType === 'RANKED_SOLO_5x5');
 
@@ -95,8 +91,6 @@ async function processAccount(acc, guildChannel, client) {
       100
     ).toFixed(1);
 
-    //const bar = createProgressBar(csPerMin, 10, 10);
-
     const embed = new EmbedBuilder()
       .setColor(part.win ? 0x57f287 : 0xed4245)
       .setTitle(`${gameName}#${tagLine} – ${part.win ? 'Victory' : 'Defeat'}`)
@@ -107,9 +101,9 @@ async function processAccount(acc, guildChannel, client) {
       .addFields(
         { name: 'Champion', value: part.championName, inline: true },
         { name: 'KDA', value: `⚔️  ${part.kills}/${part.deaths}/${part.assists}`, inline: true },
-        { name: 'Kill Participation', value: `${kp}%`, inline: true },
-        { name: 'CS/ Min', value: `📈  ${csPerMin}`, inline: true },
-        { name: 'Vision Score', value: `👁️  ${part.visionScore}`, inline: true }
+        { name: 'Kill Participation', value: `${kp}%`, inline: true },
+        { name: 'CS/ Min', value: `📈  ${csPerMin}`, inline: true },
+        { name: 'Vision Score', value: `👁️  ${part.visionScore}`, inline: true }
       )
       .setThumbnail(
         `https://ddragon.leagueoflegends.com/cdn/${getDDragonVersion()}/img/champion/${part.championName}.png`
@@ -117,18 +111,16 @@ async function processAccount(acc, guildChannel, client) {
       .setFooter({ text: `Game Duration: ${formatDuration(details.info.gameDuration)}` })
       .setTimestamp();
 
-    // Broadcast to every guild channel configured
     for (const [gid, cid] of guildChannel) {
       try {
         const guild = await client.guilds.fetch(gid);
         const channel = await guild.channels.fetch(cid);
         if (channel) await channel.send({ embeds: [embed] });
       } catch (err) {
-        logger.warn(`Broadcast to ${gid}/${cid} failed: ${err.message}`);
+        childLogger.warn(`Broadcast to ${gid}/${cid} failed: ${err.message}`);
       }
     }
 
-    // Record LP history
     acc.addLPRecord({ lp: currentLP, matchId, lpChange, rank: currentRank }, MAX_HISTORY);
     lastLP = currentLP;
     lastRank = currentRank;
@@ -137,9 +129,6 @@ async function processAccount(acc, guildChannel, client) {
   await acc.save();
 }
 
-// -----------------------------------------------------------------------------
-// helpers specific to this command
-// -----------------------------------------------------------------------------
 function parseSoloStats(solo) {
   if (!solo)
     return {

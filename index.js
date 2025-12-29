@@ -1,11 +1,16 @@
 // index.js
-require('dotenv').config();
+import 'dotenv/config';
 
-const fs = require('node:fs');
-const path = require('node:path');
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
-const mongoose = require('mongoose');
-const logger = require('./utils/logger');
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Client, GatewayIntentBits, Collection } from 'discord.js';
+import mongoose from 'mongoose';
+import logger from './utils/logger.js';
+
+// __dirname replacement for ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ---------------------------------------------------------------------------
 // #1  Configuration & early validation
@@ -29,29 +34,34 @@ const client = new Client({
 client.commands = new Collection();
 
 // ---------------------------------------------------------------------------
-// #3  Dynamic loaders
+// #3  Dynamic loaders (ESM version)
 // ---------------------------------------------------------------------------
 const JS_EXT = /\.js$/;
 
-function loadDir(dir, onLoad) {
-  const filePath = path.join(__dirname, dir);
-  if (!fs.existsSync(filePath)) return 0;
+async function loadDir(dir, onLoad) {
+  const dirPath = path.join(__dirname, dir);
+  if (!fs.existsSync(dirPath)) return 0;
 
-  return fs
-    .readdirSync(filePath)
-    .filter(f => JS_EXT.test(f))
-    .reduce((count, file) => {
-      try {
-        onLoad(require(path.join(filePath, file)));
-        return count + 1;
-      } catch (err) {
-        logger.error(`Failed loading ${dir}/${file}: ${err.message}`);
-        return count;
-      }
-    }, 0);
+  const files = fs.readdirSync(dirPath).filter(f => JS_EXT.test(f));
+  let count = 0;
+
+  for (const file of files) {
+    try {
+      const filePath = path.join(dirPath, file);
+      // Convert Windows backslashes to forward slashes for URL
+      const fileUrl = `file:///${filePath.replace(/\\/g, '/')}`;
+      const module = await import(fileUrl);
+      onLoad(module.default);
+      count++;
+    } catch (err) {
+      logger.error(`Failed loading ${dir}/${file}: ${err.message}`);
+    }
+  }
+
+  return count;
 }
 
-function loadCommands() {
+async function loadCommands() {
   return loadDir('commands', command => {
     if (!command?.data?.name) {
       logger.warn('Command missing "data.name" – skipped');
@@ -62,7 +72,7 @@ function loadCommands() {
   });
 }
 
-function loadEvents() {
+async function loadEvents() {
   return loadDir('events', event => {
     const handler = (...args) => event.execute(...args, client);
     event.once ? client.once(event.name, handler) : client.on(event.name, handler);
@@ -71,24 +81,22 @@ function loadEvents() {
 }
 
 // ---------------------------------------------------------------------------
-// #4  Start-up
+// #4  Start-up (top-level await)
 // ---------------------------------------------------------------------------
-(async function start() {
-  try {
-    const commandsLoaded = loadCommands();
-    const eventsLoaded = loadEvents();
-    logger.info(`Commands loaded: ${commandsLoaded} | Events loaded: ${eventsLoaded}`);
+try {
+  const commandsLoaded = await loadCommands();
+  const eventsLoaded = await loadEvents();
+  logger.info(`Commands loaded: ${commandsLoaded} | Events loaded: ${eventsLoaded}`);
 
-    await mongoose.connect(MONGODB_URI);
-    logger.info('✅ Connected to MongoDB');
+  await mongoose.connect(MONGODB_URI);
+  logger.info('✅ Connected to MongoDB');
 
-    await client.login(DISCORD_TOKEN);
-    logger.info(`✅ Logged in as ${client.user.tag}`);
-  } catch (err) {
-    logger.error(`Startup failed: ${err.stack || err}`);
-    process.exit(1);
-  }
-})();
+  await client.login(DISCORD_TOKEN);
+  logger.info(`✅ Logged in as ${client.user.tag}`);
+} catch (err) {
+  logger.error(`Startup failed: ${err.stack || err}`);
+  process.exit(1);
+}
 
 // ---------------------------------------------------------------------------
 // #5  Process-level robustness

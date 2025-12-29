@@ -1,9 +1,9 @@
 // utils/generateImage.js
 // TODO: Refactor this file to use the new Chart.js API
 
-const { createCanvas, Image } = require('canvas');
-const { Chart, registerables } = require('chart.js');
-const annotationPlugin = require('chartjs-plugin-annotation');
+import { createCanvas, Image } from 'canvas';
+import { Chart, registerables } from 'chart.js';
+import annotationPlugin from 'chartjs-plugin-annotation';
 
 Chart.register(...registerables, annotationPlugin);
 global.Image = Image;
@@ -116,7 +116,7 @@ async function generateLPGraph(lpHistory, summonerName) {
   // Create annotations for main tier boundaries only (IV division or single-tier)
   // We'll show all relevant divisions as ticks, so we only annotate the base tier line (IV or single-tier).
   const relevantAnnotations = [];
-  for (const [rank, data] of Object.entries(rankLPMap)) {
+  for (const [, data] of Object.entries(rankLPMap)) {
     const base = data.baseLP;
     // Annotate only if within range
     if (base >= minTotalLP && base <= maxBuffer) {
@@ -270,4 +270,4 @@ async function generateLPGraph(lpHistory, summonerName) {
   return canvas.toBuffer();
 }
 
-module.exports = { generateLPGraph };
+export { generateLPGraph };

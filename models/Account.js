@@ -1,5 +1,5 @@
-const mongoose = require('mongoose');
-const { BASE_OPTIONS } = require('./baseOptions');
+import mongoose from 'mongoose';
+import { BASE_OPTIONS } from './baseOptions.js';
 
 // Single LP entry
 const lpRecordSchema = new mongoose.Schema(
@@ -10,7 +10,7 @@ const lpRecordSchema = new mongoose.Schema(
     lpChange: Number,
     rank: String,
   },
-  BASE_OPTIONS
+  { _id: false }
 );
 
 const accountSchema = new mongoose.Schema(
@@ -20,7 +20,6 @@ const accountSchema = new mongoose.Schema(
     tagLine: { type: String, required: true },
     region: { type: String, required: true },
     puuid: { type: String, required: true },
-    summonerId: { type: String, required: true },
     lastMatchId: String,
     lastLP: Number,
     lpHistory: [lpRecordSchema],
@@ -41,4 +40,4 @@ accountSchema.methods.addLPRecord = function ({ lp, matchId, lpChange, rank }, m
   this.lastLP = lp;
 };
 
-module.exports = mongoose.model('Account', accountSchema);
+export default mongoose.models.Account || mongoose.model('Account', accountSchema);

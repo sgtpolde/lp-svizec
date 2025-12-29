@@ -1,67 +1,67 @@
 // commands/addAccount.js
-const Account = require('../models/Account');
-const { getPUUIDByRiotID, getSummonerByPUUID, getRankedStats } = require('../utils/riotApi');
-const { getDDragonVersion } = require('../utils/ddragon');
-const { EmbedBuilder, PermissionsBitField } = require('discord.js');
-const { VALID_REGIONS, REGION_ALIASES } = require('../utils/constants');
-const { safeDeleteMessage, capitalizeFirst } = require('../utils/helpers');
-const logger = require('../utils/logger').child({ label: 'commands/addAccount' });
+import Account from '../models/Account.js';
+import { getPUUIDByRiotID, getSummonerByPUUID, getRankedStats } from '../utils/riotApi.js';
+import { getDDragonVersion } from '../utils/ddragon.js';
+import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
+import { VALID_REGIONS, REGION_ALIASES } from '../utils/constants.js';
+import { capitalizeFirst } from '../utils/helpers.js';
+import logger from '../utils/logger.js';
 
-module.exports = {
-  data: {
-    name: 'addaccount',
-    description: 'Add a League of Legends account to track',
-  },
+const childLogger = logger.child({ label: 'commands/addAccount' });
+
+export default {
+  data: new SlashCommandBuilder()
+    .setName('addaccount')
+    .setDescription('Add a League of Legends account to track')
+    .addStringOption(option =>
+      option
+        .setName('gamename')
+        .setDescription('The summoner game name (without tag)')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName('tagline')
+        .setDescription('The summoner tag line (without #)')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName('region')
+        .setDescription('The server region')
+        .setRequired(true)
+        .addChoices(...VALID_REGIONS.map(r => ({ name: r.toUpperCase(), value: r })))
+    ),
 
   /**
-   * @param {import('discord.js').Message} message
-   * @param {string[]} args
+   * @param {import('discord.js').ChatInputCommandInteraction} interaction
    */
-  async execute(message, args) {
-    if (!message.guild.members.me.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-      await message.reply('❌  I need **Manage Messages** permission to tidy up command messages.');
-      return;
-    }
+  async execute(interaction) {
+    await interaction.deferReply();
 
-    if (args.length < 3) {
-      await message.reply(
-        '❌  Usage: `!addaccount <GameName> <TagLine> <Region>`\n' +
-          'Example: `!addaccount SummonerName 1234 euw`'
-      );
-      await safeDeleteMessage(message);
-      return;
-    }
-
-    const [gameName, tagLine, rawRegion] = args;
+    const gameName = interaction.options.getString('gamename');
+    const tagLine = interaction.options.getString('tagline');
+    const rawRegion = interaction.options.getString('region');
     const region = REGION_ALIASES[rawRegion.toLowerCase()] || rawRegion.toLowerCase();
-    if (!VALID_REGIONS.includes(region)) {
-      await message.reply(`❌  Invalid region. Valid regions: ${VALID_REGIONS.join(', ')}`);
-      await safeDeleteMessage(message);
-      return;
-    }
-
-    const pending = await message.channel.send('🔄  Fetching account data…');
 
     try {
       const { puuid } = await getPUUIDByRiotID(gameName, tagLine);
       const summoner = await getSummonerByPUUID(puuid, region);
 
-      if (await Account.findOne({ discordId: message.author.id, puuid, region })) {
-        await pending.edit('⚠️  You already track that account.');
-        await safeDeleteMessage(message);
+      if (await Account.findOne({ discordId: interaction.user.id, puuid, region })) {
+        await interaction.editReply('⚠️  You already track that account.');
         return;
       }
 
-      const ranked = await getRankedStats(summoner.id, region);
+      const ranked = await getRankedStats(puuid, region);
       const solo = ranked.find(q => q.queueType === 'RANKED_SOLO_5x5');
 
       const account = new Account({
-        discordId: message.author.id,
+        discordId: interaction.user.id,
         gameName,
         tagLine,
         region,
         puuid,
-        summonerId: summoner.id,
       });
 
       let rank = 'Unranked';
@@ -71,11 +71,9 @@ module.exports = {
       }
       await account.save();
 
-      /* ---------- thumbnail URL with fall‑back ---------- */
       const ddragonVer = getDDragonVersion();
       const iconId = summoner.profileIconId || 0;
       const thumbUrl = `https://ddragon.leagueoflegends.com/cdn/${ddragonVer}/img/profileicon/${iconId}.png`;
-      // basic sanity check
       const validUrl = /^https:\/\/.+\.png$/.test(thumbUrl) ? thumbUrl : undefined;
 
       const embed = new EmbedBuilder()
@@ -91,13 +89,10 @@ module.exports = {
 
       if (validUrl) embed.setThumbnail(validUrl);
 
-      await pending.edit({ content: '', embeds: [embed] });
-      await safeDeleteMessage(message);
+      await interaction.editReply({ embeds: [embed] });
     } catch (err) {
-      logger.error(`AddAccount failed → ${err.stack || err}`);
-      await safeDeleteMessage(pending);
-      await safeDeleteMessage(message);
-      await message.reply(mapRiotError(err));
+      childLogger.error(`AddAccount failed → ${err.stack || err}`);
+      await interaction.editReply({ content: mapRiotError(err), ephemeral: true });
     }
   },
 };

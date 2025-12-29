@@ -8,10 +8,8 @@ const transform = (_, ret) => {
   return ret;
 };
 
-module.exports = {
-  BASE_OPTIONS: {
-    timestamps: true, // adds createdAt / updatedAt
-    versionKey: false, // drop __v
-    toJSON: { virtuals: true, transform },
-  },
+export const BASE_OPTIONS = {
+  timestamps: true, // adds createdAt / updatedAt
+  versionKey: false, // drop __v
+  toJSON: { virtuals: true, transform },
 };

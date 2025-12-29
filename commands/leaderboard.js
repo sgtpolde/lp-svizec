@@ -1,39 +1,41 @@
 // commands/leaderboard.js
 
-const Account = require('../models/Account');
-const GuildSettings = require('../models/GuildSettings');
-const { EmbedBuilder } = require('discord.js');
-const { TIER_EMOJIS } = require('../utils/constants');
-const { capitalizeFirst } = require('../utils/helpers');
-const logger = require('../utils/logger').child({ label: 'commands/leaderboard' });
-const { getRankedStats } = require('../utils/riotApi');
+import Account from '../models/Account.js';
+import GuildSettings from '../models/GuildSettings.js';
+import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
+import { TIER_EMOJIS } from '../utils/constants.js';
+import { capitalizeFirst } from '../utils/helpers.js';
+import logger from '../utils/logger.js';
+import { getRankedStats } from '../utils/riotApi.js';
+
+const childLogger = logger.child({ label: 'commands/leaderboard' });
 
 const MAX_ENTRIES = 50; // Discord embed desc cap ≈ 4k chars
 const MIN_GAMES_FOR_QUALIFICATION = 100; // Mark as Disqualified if below this
 
-module.exports = {
-  data: {
-    name: 'leaderboard',
-    description: 'Show ranked leaderboard of tracked accounts',
-  },
+export default {
+  data: new SlashCommandBuilder()
+    .setName('leaderboard')
+    .setDescription('Show ranked leaderboard of tracked accounts'),
 
   /**
-   * @param {import('discord.js').Message | null} message
-   * @param {string[]|null} _args
+   * @param {import('discord.js').ChatInputCommandInteraction | null} interaction
    * @param {import('discord.js').Client} client
    */
-  async execute(message, _args, client) {
+  async execute(interaction, client) {
     const accounts = await Account.find();
     if (!accounts.length) {
-      if (message) await message.reply('No accounts are being tracked yet.');
+      if (interaction) await interaction.reply('No accounts are being tracked yet.');
       return;
     }
 
-  const rankings = await buildSortedRankings(accounts);
-  const embed = makeEmbed(rankings);
+    if (interaction) await interaction.deferReply();
 
-    // ─── Scheduled run (message == null) – broadcast every 4h ──────────────
-    if (!message) {
+    const rankings = await buildSortedRankings(accounts);
+    const embed = makeEmbed(rankings);
+
+    // ─── Scheduled run (interaction == null) – broadcast every 4h ──────────────
+    if (!interaction) {
       const settings = await GuildSettings.find();
       for (const { guildId, channelId } of settings) {
         try {
@@ -42,14 +44,14 @@ module.exports = {
             await chan.send({ embeds: [embed] });
           }
         } catch (e) {
-          logger.warn(`Broadcast to ${guildId}/${channelId} failed – ${e.message}`);
+          childLogger.warn(`Broadcast to ${guildId}/${channelId} failed – ${e.message}`);
         }
       }
       return;
     }
 
     // manual invocation
-    await message.channel.send({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
 
@@ -80,7 +82,9 @@ async function buildSortedRankings(accs) {
         winRate = totalGamesPlayed > 0 ? Math.round((wins / totalGamesPlayed) * 100) : 0;
       }
     } catch (error) {
-      logger.warn(`Failed to fetch ranked stats for ${a.gameName}#${a.tagLine}: ${error.message}`);
+      childLogger.warn(
+        `Failed to fetch ranked stats for ${a.gameName}#${a.tagLine}: ${error.message}`
+      );
     }
 
     rankings.push({
@@ -156,7 +160,6 @@ function makeEmbed(rankings) {
     if (lines.length) lines.push('');
     lines.push(`**Disqualified (< ${MIN_GAMES_FOR_QUALIFICATION} games)**`);
     const startIdx = lines.length;
-    let count = 0;
     for (let i = 0; i < disqualified.length && lines.length < MAX_ENTRIES + startIdx; i++) {
       const r = disqualified[i];
       const emoji = TIER_EMOJIS[r.tier] ?? TIER_EMOJIS.UNRANKED;
@@ -168,7 +171,6 @@ function makeEmbed(rankings) {
         r.totalGamesPlayed > 0
           ? ` • ${r.totalGamesPlayed}G (${r.wins}W/${r.losses}L) ${r.winRate}%`
           : '';
-      count++;
       lines.push(`• ${r.name} (${r.region}) — ${emoji} ${rankTxt}${gamesInfo}`);
     }
   }

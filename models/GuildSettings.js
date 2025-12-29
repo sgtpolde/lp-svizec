@@ -1,5 +1,5 @@
-const mongoose = require('mongoose');
-const { BASE_OPTIONS } = require('./baseOptions');
+import mongoose from 'mongoose';
+import { BASE_OPTIONS } from './baseOptions.js';
 
 const guildSettingsSchema = new mongoose.Schema(
   {
@@ -9,4 +9,5 @@ const guildSettingsSchema = new mongoose.Schema(
   BASE_OPTIONS
 );
 
-module.exports = mongoose.model('GuildSettings', guildSettingsSchema);
+export default mongoose.models.GuildSettings ||
+  mongoose.model('GuildSettings', guildSettingsSchema);

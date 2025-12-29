@@ -1,34 +1,47 @@
 // commands/gengraph.js
-const { generateLPGraph } = require('../utils/generateImage');
-const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
-const Account = require('../models/Account');
-const logger = require('../utils/logger').child({ label: 'commands/gengraph' });
+import { generateLPGraph } from '../utils/generateImage.js';
+import { EmbedBuilder, AttachmentBuilder, SlashCommandBuilder } from 'discord.js';
+import Account from '../models/Account.js';
+import logger from '../utils/logger.js';
 
-module.exports = {
-  data: {
-    name: 'gengraph',
-    description: 'Generate and display LP history graph for a summoner',
-  },
+const childLogger = logger.child({ label: 'commands/gengraph' });
 
-  /** @param {import('discord.js').Message} message @param {string[]} args */
-  async execute(message, args) {
-    const query = args.join(' ').replace(/\s+/g, ''); // trim spaces around #
-    if (!query) {
-      await message.reply('❌  Usage: `!gengraph <SummonerName[#TagLine]>`');
-      return;
-    }
+export default {
+  data: new SlashCommandBuilder()
+    .setName('gengraph')
+    .setDescription('Generate and display LP history graph for a summoner')
+    .addStringOption(option =>
+      option
+        .setName('summoner')
+        .setDescription('Summoner name in format: GameName#TagLine')
+        .setRequired(true)
+    ),
 
-    let [gameName, tagLine] = query.split('#');
-    tagLine = tagLine ?? undefined; // undefined if not supplied
+  /**
+   * @param {import('discord.js').ChatInputCommandInteraction} interaction
+   */
+  async execute(interaction) {
+    await interaction.deferReply();
+
+    const query = interaction.options.getString('summoner').replace(/\s+/g, '');
+    const parts = query.split('#');
+    const gameName = parts[0];
+    const tagLine = parts[1] || undefined;
 
     try {
       const account = await Account.findOne(tagLine ? { gameName, tagLine } : { gameName });
       if (!account) {
-        await message.reply('❌  No tracked account matches that name.');
+        await interaction.editReply({
+          content: '❌  No tracked account matches that name.',
+          ephemeral: true,
+        });
         return;
       }
       if (!account.lpHistory?.length) {
-        await message.reply('❌  This account has no LP history yet.');
+        await interaction.editReply({
+          content: '❌  This account has no LP history yet.',
+          ephemeral: true,
+        });
         return;
       }
 
@@ -44,10 +57,13 @@ module.exports = {
         .setImage('attachment://lp-graph.png')
         .setTimestamp();
 
-      await message.reply({ embeds: [embed], files: [attach] });
+      await interaction.editReply({ embeds: [embed], files: [attach] });
     } catch (err) {
-      logger.error(`gengraph failed → ${err.stack || err}`);
-      await message.reply('❌  An error occurred while generating the graph.');
+      childLogger.error(`gengraph failed → ${err.stack || err}`);
+      await interaction.editReply({
+        content: '❌  An error occurred while generating the graph.',
+        ephemeral: true,
+      });
     }
   },
 };

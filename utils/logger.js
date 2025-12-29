@@ -5,7 +5,7 @@
 //  • PM2/CI     → plain lines (no escape codes, no JSON)
 // ---------------------------------------------------------------------------
 
-const { createLogger, format, transports } = require('winston');
+import { createLogger, format, transports } from 'winston';
 
 const LEVEL = process.env.LOG_LEVEL ?? 'info';
 const IS_TTY = process.stdout.isTTY; // false when PM2 captures stdout
@@ -51,4 +51,4 @@ logger.http = (...args) => logger.log('http', ...args);
 process.on('unhandledRejection', err => logger.error(err.stack || err));
 process.on('uncaughtException', err => logger.error(err.stack || err));
 
-module.exports = logger;
+export default logger;
