@@ -31,7 +31,7 @@ export default {
     // — Permission checks —
     const missing = missingPerms(interaction);
     if (missing) {
-      await interaction.reply({ content: missing, ephemeral: true });
+      await interaction.reply({ content: missing, flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -42,7 +42,7 @@ export default {
       await interaction.reply({
         content:
           '⚠️  Delete **ALL** messages in this channel? Use the button below to confirm within 30 seconds.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
 
       const proceed = await confirmWithButton(interaction);
@@ -61,11 +61,11 @@ export default {
       if (amount > MAX_DELETE) {
         await interaction.reply({
           content: `❌  You can delete at most ${MAX_DELETE} messages at once.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const deleted = await purgeChannel(interaction.channel, amount);
       await interaction.editReply(`✅  Deleted **${deleted}** messages.`);
     }

@@ -1,6 +1,6 @@
 // commands/init.js
 
-import { PermissionsBitField, EmbedBuilder, SlashCommandBuilder } from 'discord.js';
+import { EmbedBuilder, MessageFlags, PermissionsBitField, SlashCommandBuilder } from 'discord.js';
 import GuildSettings from '../models/GuildSettings.js';
 import logger from '../utils/logger.js';
 
@@ -19,7 +19,7 @@ export default {
     if (!interaction.inGuild()) {
       await interaction.reply({
         content: '❌  This command can only be used inside a server.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -27,7 +27,7 @@ export default {
     if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
       await interaction.reply({
         content: '❌  You need **Administrator** permission to run this.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -55,7 +55,7 @@ export default {
       childLogger.error(`Init failed in guild ${guildId} – ${err.stack || err}`);
       await interaction.reply({
         content: '❌  An error occurred while initialising the bot.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   },

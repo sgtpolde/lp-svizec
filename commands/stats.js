@@ -2,7 +2,7 @@
 
 import Account from '../models/Account.js';
 import GuildSettings from '../models/GuildSettings.js';
-import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
+import { EmbedBuilder, MessageFlags, SlashCommandBuilder } from 'discord.js';
 import {
   getMatchHistory,
   getMatchDetails,
@@ -32,7 +32,7 @@ export default {
     if (!(await isApiKeyValid())) {
       const msg = 'Riot API key invalid / expired – stats aborted.';
       childLogger.error(msg);
-      if (interaction) await interaction.reply({ content: `❌  ${msg}`, ephemeral: true });
+      if (interaction) await interaction.reply({ content: `❌  ${msg}`, flags: MessageFlags.Ephemeral });
       return;
     }
 

@@ -92,7 +92,7 @@ export default {
       await interaction.editReply({ embeds: [embed] });
     } catch (err) {
       childLogger.error(`AddAccount failed → ${err.stack || err}`);
-      await interaction.editReply({ content: mapRiotError(err), ephemeral: true });
+      await interaction.editReply({ content: mapRiotError(err) });
     }
   },
 };

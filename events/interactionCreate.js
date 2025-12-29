@@ -1,5 +1,6 @@
 // events/interactionCreate.js
 
+import { MessageFlags } from 'discord.js';
 import logger from '../utils/logger.js';
 
 const childLogger = logger.child({ label: 'events/interactionCreate' });
@@ -16,7 +17,7 @@ export default {
       childLogger.warn(`Unknown command: ${interaction.commandName}`);
       await interaction.reply({
         content: '❌ Unknown command.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -36,7 +37,7 @@ export default {
         if (interaction.deferred || interaction.replied) {
           await interaction.editReply(errorMessage);
         } else {
-          await interaction.reply({ content: errorMessage, ephemeral: true });
+          await interaction.reply({ content: errorMessage, flags: MessageFlags.Ephemeral });
         }
       } catch (replyError) {
         childLogger.error(`Failed to send error message: ${replyError.message}`);

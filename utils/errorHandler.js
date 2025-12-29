@@ -1,6 +1,7 @@
 // utils/errorHandler.js
 // Centralized error handling utilities
 
+import { MessageFlags } from 'discord.js';
 import logger from './logger.js';
 
 /**
@@ -43,7 +44,7 @@ export async function handleInteractionError(error, interaction, commandLogger) 
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply(errorMessage);
     } else {
-      await interaction.reply({ content: errorMessage, ephemeral: true });
+      await interaction.reply({ content: errorMessage, flags: MessageFlags.Ephemeral });
     }
   } catch (replyError) {
     commandLogger.error(`Failed to send error message: ${replyError.message}`);
@@ -87,6 +88,6 @@ export function logError(error, customLogger = logger) {
 export function createErrorResponse(message, ephemeral = true) {
   return {
     content: message.startsWith('❌') ? message : `❌ ${message}`,
-    ephemeral,
+    flags: ephemeral ? MessageFlags.Ephemeral : undefined,
   };
 }

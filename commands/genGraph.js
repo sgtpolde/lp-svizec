@@ -1,6 +1,6 @@
 // commands/gengraph.js
 import { generateLPGraph } from '../utils/generateImage.js';
-import { EmbedBuilder, AttachmentBuilder, SlashCommandBuilder } from 'discord.js';
+import { AttachmentBuilder, EmbedBuilder, SlashCommandBuilder } from 'discord.js';
 import Account from '../models/Account.js';
 import logger from '../utils/logger.js';
 
@@ -33,14 +33,12 @@ export default {
       if (!account) {
         await interaction.editReply({
           content: '❌  No tracked account matches that name.',
-          ephemeral: true,
         });
         return;
       }
       if (!account.lpHistory?.length) {
         await interaction.editReply({
           content: '❌  This account has no LP history yet.',
-          ephemeral: true,
         });
         return;
       }
@@ -62,7 +60,6 @@ export default {
       childLogger.error(`gengraph failed → ${err.stack || err}`);
       await interaction.editReply({
         content: '❌  An error occurred while generating the graph.',
-        ephemeral: true,
       });
     }
   },

@@ -1,7 +1,7 @@
 // commands/removeAccount.js
 
 import Account from '../models/Account.js';
-import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
+import { EmbedBuilder, MessageFlags, SlashCommandBuilder } from 'discord.js';
 import { VALID_REGIONS, REGION_ALIASES } from '../utils/constants.js';
 import logger from '../utils/logger.js';
 
@@ -62,7 +62,7 @@ export default {
       childLogger.error(`removeAccount failed → ${err.stack || err}`);
       await interaction.reply({
         content: '❌  An error occurred while removing the account.',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   },
