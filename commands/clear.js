@@ -1,6 +1,6 @@
 // commands/clear.js
 
-import { PermissionsBitField, EmbedBuilder, Collection, SlashCommandBuilder } from 'discord.js';
+import { PermissionsBitField, EmbedBuilder, Collection, MessageFlags, SlashCommandBuilder } from 'discord.js';
 import logger from '../utils/logger.js';
 
 const childLogger = logger.child({ label: 'commands/clear' });
