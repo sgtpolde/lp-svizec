@@ -36,22 +36,22 @@
   "description": "",
   "dependencies": {
     "@eslint/js": "^10.0.1",
-    "axios": "^1.15.2",
+    "axios": "^1.18.1",
     "canvas": "^3.2.3",
     "chart.js": "^4.5.1",
     "chartjs-plugin-annotation": "^3.1.0",
-    "discord.js": "^14.26.3",
+    "discord.js": "^14.26.4",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "mongoose": "^9.5.0",
-    "node-cron": "^4.2.1",
+    "mongoose": "^9.7.4",
+    "node-cron": "^4.6.0",
     "winston": "^3.19.0"
   },
   "devDependencies": {
-    "eslint": "^10.2.1",
+    "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.5",
+    "eslint-plugin-prettier": "^5.5.6",
     "nodemon": "^3.1.14",
-    "prettier": "^3.8.3"
+    "prettier": "^3.9.4"
   }
 }
